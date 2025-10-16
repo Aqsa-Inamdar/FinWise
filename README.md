@@ -1,0 +1,2 @@
+# FinWise
+Financial Management app
