@@ -51,16 +51,39 @@ export function AddIncomeDialog() {
   });
 
   const onSubmit = async (data: IncomeFormValues) => {
-    console.log("Income submitted:", data);
-    // TODO: Add API call to save income
-    
-    toast({
-      title: "Income added",
-      description: `Successfully added income of $${data.amount}`,
-    });
+    try {
+      const response = await fetch("/api/income", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: data.amount,
+          source: data.source,
+          description: data.description,
+          date: new Date(data.date),
+        }),
+      });
 
-    form.reset();
-    setOpen(false);
+      if (!response.ok) {
+        throw new Error("Failed to add income");
+      }
+
+      toast({
+        title: "Income added",
+        description: `Successfully added income of $${data.amount}`,
+      });
+
+      form.reset();
+      setOpen(false);
+      
+      // Trigger a page reload to update the data
+      window.location.reload();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add income. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (

@@ -69,16 +69,39 @@ export function AddExpenseDialog() {
   });
 
   const onSubmit = async (data: ExpenseFormValues) => {
-    console.log("Expense submitted:", data);
-    // TODO: Add API call to save expense
-    
-    toast({
-      title: "Expense added",
-      description: `Successfully added expense of $${data.amount}`,
-    });
+    try {
+      const response = await fetch("/api/expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: data.amount,
+          category: data.category,
+          description: data.description,
+          date: new Date(data.date),
+        }),
+      });
 
-    form.reset();
-    setOpen(false);
+      if (!response.ok) {
+        throw new Error("Failed to add expense");
+      }
+
+      toast({
+        title: "Expense added",
+        description: `Successfully added expense of $${data.amount}`,
+      });
+
+      form.reset();
+      setOpen(false);
+      
+      // Trigger a page reload to update the data
+      window.location.reload();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add expense. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
