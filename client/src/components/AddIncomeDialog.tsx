@@ -23,6 +23,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 
 const incomeFormSchema = z.object({
   amount: z.string().min(1, "Amount is required").refine(
@@ -50,8 +52,8 @@ export function AddIncomeDialog() {
     },
   });
 
-  const onSubmit = async (data: IncomeFormValues) => {
-    try {
+  const mutation = useMutation({
+    mutationFn: async (data: IncomeFormValues) => {
       const response = await fetch("/api/income", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -67,23 +69,28 @@ export function AddIncomeDialog() {
         throw new Error("Failed to add income");
       }
 
+      return response.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/income"] });
       toast({
         title: "Income added",
-        description: `Successfully added income of $${data.amount}`,
+        description: `Successfully added income of $${variables.amount}`,
       });
-
       form.reset();
       setOpen(false);
-      
-      // Trigger a page reload to update the data
-      window.location.reload();
-    } catch (error) {
+    },
+    onError: () => {
       toast({
         title: "Error",
         description: "Failed to add income. Please try again.",
         variant: "destructive",
       });
-    }
+    },
+  });
+
+  const onSubmit = (data: IncomeFormValues) => {
+    mutation.mutate(data);
   };
 
   return (
@@ -94,10 +101,10 @@ export function AddIncomeDialog() {
           Add Income
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]" aria-describedby="income-dialog-description">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle id="income-dialog-title">Add New Income</DialogTitle>
-          <DialogDescription id="income-dialog-description">
+          <DialogTitle>Add New Income</DialogTitle>
+          <DialogDescription>
             Record your income sources. All fields are required.
           </DialogDescription>
         </DialogHeader>

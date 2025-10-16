@@ -30,6 +30,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 
 const expenseCategories = [
   { value: "rent", label: "Rent/Housing" },
@@ -68,8 +70,8 @@ export function AddExpenseDialog() {
     },
   });
 
-  const onSubmit = async (data: ExpenseFormValues) => {
-    try {
+  const mutation = useMutation({
+    mutationFn: async (data: ExpenseFormValues) => {
       const response = await fetch("/api/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,23 +87,28 @@ export function AddExpenseDialog() {
         throw new Error("Failed to add expense");
       }
 
+      return response.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
       toast({
         title: "Expense added",
-        description: `Successfully added expense of $${data.amount}`,
+        description: `Successfully added expense of $${variables.amount}`,
       });
-
       form.reset();
       setOpen(false);
-      
-      // Trigger a page reload to update the data
-      window.location.reload();
-    } catch (error) {
+    },
+    onError: () => {
       toast({
         title: "Error",
         description: "Failed to add expense. Please try again.",
         variant: "destructive",
       });
-    }
+    },
+  });
+
+  const onSubmit = (data: ExpenseFormValues) => {
+    mutation.mutate(data);
   };
 
   return (
@@ -112,10 +119,10 @@ export function AddExpenseDialog() {
           Add Expense
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]" aria-describedby="expense-dialog-description">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle id="expense-dialog-title">Add New Expense</DialogTitle>
-          <DialogDescription id="expense-dialog-description">
+          <DialogTitle>Add New Expense</DialogTitle>
+          <DialogDescription>
             Track your spending by adding a new expense. All fields are required.
           </DialogDescription>
         </DialogHeader>
