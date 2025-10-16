@@ -7,6 +7,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { UserMenu } from "@/components/UserMenu";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Goals from "@/pages/Goals";
@@ -27,7 +28,10 @@ function AuthenticatedLayout() {
         <div className="flex flex-1 flex-col">
           <header className="flex items-center justify-between border-b p-4">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <UserMenu />
+            </div>
           </header>
           <main className="flex-1 overflow-auto p-6">
             <Switch>
