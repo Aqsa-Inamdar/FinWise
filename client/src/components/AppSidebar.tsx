@@ -9,7 +9,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "react-router-dom";
 
 const menuItems = [
   {
@@ -39,7 +39,7 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
-  const [location] = useLocation();
+  const location = useLocation();
 
   return (
     <Sidebar>
@@ -50,11 +50,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {menuItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={location === item.url}>
-                    <a href={item.url} data-testid={item.testId}>
+                  <SidebarMenuButton asChild isActive={location.pathname === item.url}>
+                    <Link to={item.url} data-testid={item.testId}>
                       <item.icon />
                       <span>{item.title}</span>
-                    </a>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

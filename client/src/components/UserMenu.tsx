@@ -9,14 +9,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { useLocation } from "wouter";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthProvider";
 
 export function UserMenu() {
-  const [, setLocation] = useLocation();
+  const navigate = useNavigate();
+  const { signOut } = useAuth();
 
-  const handleLogout = () => {
-    console.log("Logging out...");
-    setLocation("/login");
+  const handleLogout = async () => {
+    await signOut();
+    navigate("/login");
   };
 
   return (

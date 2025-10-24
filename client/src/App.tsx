@@ -1,4 +1,4 @@
-import { Switch, Route, useLocation } from "wouter";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -16,6 +16,7 @@ import Goals from "@/pages/Goals";
 import Insights from "@/pages/Insights";
 import Assistant from "@/pages/Assistant";
 import NotFound from "@/pages/not-found";
+import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 
 function AuthenticatedLayout() {
   const style = {
@@ -38,13 +39,13 @@ function AuthenticatedLayout() {
             </div>
           </header>
           <main id="main-content" className="flex-1 overflow-auto p-6" tabIndex={-1}>
-            <Switch>
-              <Route path="/dashboard" component={Dashboard} />
-              <Route path="/goals" component={Goals} />
-              <Route path="/insights" component={Insights} />
-              <Route path="/assistant" component={Assistant} />
-              <Route component={NotFound} />
-            </Switch>
+            <Routes>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/goals" element={<Goals />} />
+              <Route path="/insights" element={<Insights />} />
+              <Route path="/assistant" element={<Assistant />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
           </main>
         </div>
       </div>
@@ -52,25 +53,35 @@ function AuthenticatedLayout() {
   );
 }
 
-function Router() {
-  const [location] = useLocation();
-  
-  // Show login page for /login route or root route
-  if (location === "/login" || location === "/") {
-    return <Login />;
-  }
-
-  return <AuthenticatedLayout />;
+function RequireAuth({ children }: { children: JSX.Element }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="p-6">Loading...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  return children;
 }
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <ThemeProvider>
-          <Router />
-        </ThemeProvider>
-        <Toaster />
+        <AuthProvider>
+          <BrowserRouter>
+            <ThemeProvider>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route
+                  path="/*"
+                  element={
+                    <RequireAuth>
+                      <AuthenticatedLayout />
+                    </RequireAuth>
+                  }
+                />
+              </Routes>
+            </ThemeProvider>
+            <Toaster />
+          </BrowserRouter>
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

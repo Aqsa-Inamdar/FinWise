@@ -1,13 +1,16 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Wallet } from "lucide-react";
+import { signInWithGoogle } from "@/lib/firebase";
+import { useAuth } from "@/contexts/AuthProvider";
 
 export default function Login() {
-  const [, setLocation] = useLocation();
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -15,12 +18,21 @@ export default function Login() {
     e.preventDefault();
     // TODO: Replace with actual authentication
     console.log("Login attempt:", { email, password });
-    setLocation("/dashboard");
+    navigate("/dashboard");
   };
 
   const handleDemoLogin = () => {
     // Quick demo access - open for all users
-    setLocation("/dashboard");
+    navigate("/dashboard");
+  };
+
+  const handleGoogle = async () => {
+    try {
+      await signInWithGoogle();
+      navigate("/dashboard");
+    } catch (e) {
+      console.error("Google sign-in failed", e);
+    }
   };
 
   return (
@@ -83,14 +95,25 @@ export default function Login() {
             </div>
           </div>
 
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={handleDemoLogin}
-            data-testid="button-demo"
-          >
-            Continue with Demo Account
-          </Button>
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleGoogle}
+              data-testid="button-google"
+            >
+              Continue with Google
+            </Button>
+
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleDemoLogin}
+              data-testid="button-demo"
+            >
+              Continue with Demo Account
+            </Button>
+          </div>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Don't have an account?{" "}
