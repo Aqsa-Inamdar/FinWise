@@ -91,7 +91,7 @@ export default function Dashboard() {
         <StatCard
           title="Net Savings"
           value={`$${netSavings.toLocaleString()}`}
-          trend={{ value: netSavings > 0 ? 12.3 : -5.2, isPositive: netSavings > 0 }}
+          trend={{ value: netSavings > 0 ? 12.3 : 0, isPositive: netSavings > 0 }}
           icon={<Wallet className="h-5 w-5" />}
           testId="card-savings"
         />
