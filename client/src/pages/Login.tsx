@@ -36,7 +36,14 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <main
+      className="flex min-h-screen items-center justify-center bg-background p-4"
+      aria-labelledby="login-page-title"
+      role="main"
+    >
+      <h1 id="login-page-title" className="sr-only">
+        Sign in to FinWise
+      </h1>
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-4 text-center">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -128,6 +135,6 @@ export default function Login() {
           </p>
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

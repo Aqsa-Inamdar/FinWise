@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
 
@@ -14,6 +15,9 @@ interface ExpenseChartProps {
 
 export function ExpenseChart({ data, title = "Expenses by Category" }: ExpenseChartProps) {
   const total = data.reduce((sum, item) => sum + item.amount, 0);
+  const headingId = useId();
+  const descriptionId = useId();
+  const sortedData = [...data].sort((a, b) => b.amount - a.amount);
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -30,13 +34,25 @@ export function ExpenseChart({ data, title = "Expenses by Category" }: ExpenseCh
     return null;
   };
 
+  const chartSummary = total
+    ? `You have ${data.length} expense categories totaling $${total.toLocaleString()}. The highest category is ${sortedData[0]?.category ?? "none"} with $${sortedData[0]?.amount.toLocaleString() ?? 0}.`
+    : "No expenses available to chart.";
+
   return (
-    <Card data-testid="card-expense-chart">
+    <Card
+      data-testid="card-expense-chart"
+      role="region"
+      aria-labelledby={headingId}
+      aria-describedby={descriptionId}
+    >
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
+        <CardTitle id={headingId}>{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={300}>
+        <p id={descriptionId} className="sr-only">
+          {chartSummary}
+        </p>
+        <ResponsiveContainer width="100%" height={300} aria-hidden="true">
           <PieChart>
             <Pie
               data={data}
@@ -56,6 +72,22 @@ export function ExpenseChart({ data, title = "Expenses by Category" }: ExpenseCh
             <Legend />
           </PieChart>
         </ResponsiveContainer>
+        <table className="sr-only" aria-label={`${title} data`}>
+          <thead>
+            <tr>
+              <th scope="col">Category</th>
+              <th scope="col">Amount (USD)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedData.map((entry) => (
+              <tr key={entry.category}>
+                <td>{entry.category}</td>
+                <td>${entry.amount.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </CardContent>
     </Card>
   );

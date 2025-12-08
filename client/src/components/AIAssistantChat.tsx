@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -20,6 +20,8 @@ export function AIAssistantChat() {
     },
   ]);
   const [inputValue, setInputValue] = useState("");
+  const conversationLabelId = useId();
+  const conversationDescriptionId = useId();
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
@@ -44,16 +46,23 @@ export function AIAssistantChat() {
     }, 1000);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   return (
     <Card className="flex h-full flex-col">
-      <div className="flex-1 space-y-4 overflow-y-auto p-4" data-testid="chat-messages">
+      <section
+        aria-labelledby={conversationLabelId}
+        aria-describedby={conversationDescriptionId}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        className="flex-1 space-y-4 overflow-y-auto p-4"
+        data-testid="chat-messages"
+      >
+        <h2 id={conversationLabelId} className="sr-only">
+          AI assistant conversation
+        </h2>
+        <p id={conversationDescriptionId} className="sr-only">
+          Latest messages appear at the bottom. New responses are announced automatically.
+        </p>
         {messages.map((message) => (
           <ChatBubble
             key={message.id}
@@ -62,28 +71,35 @@ export function AIAssistantChat() {
             testId={`message-${message.id}`}
           />
         ))}
-      </div>
-      <div className="border-t p-4">
+      </section>
+      <form
+        className="border-t p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleSend();
+        }}
+        aria-label="Send a chat message"
+      >
         <div className="flex gap-2">
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
             placeholder="Ask me anything about your finances..."
             className="flex-1"
             data-testid="input-chat"
             aria-label="Chat message input"
           />
           <Button
-            onClick={handleSend}
+            type="submit"
             size="icon"
             data-testid="button-send"
             aria-label="Send message"
+            disabled={!inputValue.trim()}
           >
             <Send className="h-4 w-4" />
           </Button>
         </div>
-      </div>
+      </form>
     </Card>
   );
 }

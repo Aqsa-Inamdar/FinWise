@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,6 +32,193 @@ import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
+import Tesseract from "tesseract.js";
+
+const categoryKeywords: Record<string, string[]> = {
+  rent: ["rent", "mortgage", "lease", "apartment", "housing"],
+  food: ["restaurant", "cafe", "coffee", "food", "grocer", "dining", "meal", "bakery"],
+  transportation: ["uber", "lyft", "taxi", "gas", "transport", "bus", "train", "flight", "cab"],
+  entertainment: ["movie", "cinema", "concert", "ticket", "game", "entertainment"],
+  utilities: ["utility", "electric", "water", "internet", "wifi", "power", "gas bill"],
+  healthcare: ["clinic", "pharmacy", "doctor", "hospital", "medical", "dentist"],
+  shopping: ["store", "market", "shop", "retail", "mall", "purchase"],
+};
+
+const toIsoDate = (value: Date) => {
+  const adjusted = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return adjusted.toISOString().split("T")[0];
+};
+
+const normalizeAmount = (raw: string) => {
+  const numeric = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+  if (Number.isFinite(numeric) && Math.abs(numeric) >= 1) {
+    return Math.abs(numeric).toFixed(2);
+  }
+  return undefined;
+};
+
+const pickBestAmount = (candidates: Array<{ raw: string; weight: number }>) => {
+  const normalized = candidates
+    .map((candidate) => {
+      const normalizedValue = normalizeAmount(candidate.raw);
+      return {
+        ...candidate,
+        normalized: normalizedValue,
+        numeric: normalizedValue ? parseFloat(normalizedValue) : undefined,
+      };
+    })
+    .filter((candidate) => candidate.normalized !== undefined && candidate.numeric !== undefined) as Array<{
+      raw: string;
+      normalized: string;
+      numeric: number;
+      weight: number;
+    }>;
+
+  if (!normalized.length) return undefined;
+
+  return normalized
+    .sort((a, b) => {
+      if (b.weight !== a.weight) {
+        return b.weight - a.weight;
+      }
+
+      const aHasDecimal = /[.,]/.test(a.raw);
+      const bHasDecimal = /[.,]/.test(b.raw);
+
+      if (aHasDecimal !== bHasDecimal) {
+        return aHasDecimal ? -1 : 1;
+      }
+
+      return b.numeric - a.numeric;
+    })[0].normalized;
+};
+
+const parseReceiptDetails = (text: string) => {
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lower = text.toLowerCase();
+
+  const importantKeywords = ["total", "amount due", "balance due", "grand total", "receipt total", "amount"];
+  const supportingKeywords = ["subtotal", "tax", "due"];
+  const paymentKeywords = ["tend", "change", "cash", "visa", "amex", "mastercard", "disc", "paid", "receive"];
+
+  const amountRegexGlobal = /[$€£]?\s*-?\d{1,3}(?:[,\d]{3})*(?:\.\d{2})?|-?\d+(?:\.\d{2})?/g;
+
+  const weightedCandidates: Array<{ raw: string; weight: number }> = [];
+
+  lines.forEach((line, index) => {
+    const normalizedLine = line.toLowerCase();
+    const matches = line.match(amountRegexGlobal) || [];
+
+    let weight = 1;
+    const containsImportant = importantKeywords.some((keyword) => normalizedLine.includes(keyword));
+    const containsSupporting = supportingKeywords.some((keyword) => normalizedLine.includes(keyword));
+    const containsPayment = paymentKeywords.some((keyword) => normalizedLine.includes(keyword));
+
+    if (containsImportant) {
+      weight = 5;
+    } else if (containsSupporting) {
+      weight = 3;
+    }
+
+    if (containsPayment) {
+      weight -= 4; // de-emphasize payment method totals (e.g., TEND 100.00)
+    }
+
+    matches.forEach((raw) => {
+      const digitCount = raw.replace(/[^\d]/g, "").length;
+      const adjustedWeight = digitCount >= 7 ? weight - 2 : weight;
+      weightedCandidates.push({ raw, weight: adjustedWeight });
+    });
+
+    // Some receipts place the numeric total on the next line (e.g., "TOTAL" newline "100.00")
+    if (!matches.length && containsImportant) {
+      for (let offset = 1; offset <= 2; offset++) {
+        const neighborLine = lines[index + offset];
+        if (!neighborLine) break;
+        const neighborMatches = neighborLine.match(amountRegexGlobal);
+        if (neighborMatches?.length) {
+          neighborMatches.forEach((raw) => {
+            const digitCount = raw.replace(/[^\d]/g, "").length;
+            const adjustedWeight = digitCount >= 7 ? weight - 2 : weight;
+            weightedCandidates.push({ raw, weight: Math.max(adjustedWeight - 1, 1) });
+          });
+          break;
+        }
+      }
+    }
+  });
+
+  const currencyAmountCandidates = (text.match(/[$€£]\s*-?\d{1,3}(?:[,\d]{3})*(?:\.\d{2})?/g) ?? []).map((raw) => ({
+    raw,
+    weight: 2,
+  }));
+
+  const numericCandidates = (text.match(/\b-?\d{1,3}(?:,\d{3})*(?:\.\d{2})\b/g) ?? []).map((raw) => ({
+    raw,
+    weight: 1,
+  }));
+
+  const integerCandidates =
+    text
+      .match(/\b-?\d{2,6}\b/g)
+      ?.filter((candidate) => {
+        const numeric = Math.abs(parseInt(candidate.replace(/[^0-9-]/g, ""), 10));
+        return Number.isFinite(numeric) && numeric >= 5 && numeric <= 100000 && (numeric < 1900 || numeric > 2100);
+      })
+      .map((raw) => ({ raw, weight: 0.5 })) ?? [];
+
+  const amountValue =
+    pickBestAmount(weightedCandidates) ??
+    pickBestAmount(currencyAmountCandidates) ??
+    pickBestAmount(numericCandidates) ??
+    pickBestAmount(integerCandidates);
+
+  const slashDateMatch = text.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+  const monthNameMatch = text.match(
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{2,4}/i
+  );
+  let dateValue: string | undefined;
+
+  const tryParseDate = (raw: string | undefined) => {
+    if (!raw) return undefined;
+    const normalized = raw.replace(/-/g, "/");
+    const parsed = new Date(normalized);
+    if (!Number.isNaN(parsed.getTime())) {
+      return toIsoDate(parsed);
+    }
+    return undefined;
+  };
+
+  dateValue = tryParseDate(slashDateMatch?.[1]) ?? tryParseDate(monthNameMatch?.[0]);
+
+  let categoryValue: string | undefined;
+  for (const [value, keywords] of Object.entries(categoryKeywords)) {
+    if (keywords.some((keyword) => lower.includes(keyword))) {
+      categoryValue = value;
+      break;
+    }
+  }
+
+  let descriptionValue: string | undefined;
+  const vendorLine = lines.find(
+    (line) => line.length > 3 && !/receipt|invoice|total|amount|qty|item|description/i.test(line)
+  );
+  if (vendorLine) {
+    descriptionValue = `Purchase at ${vendorLine}`;
+  } else if (lines.length) {
+    descriptionValue = `Expense from ${lines[0]}`;
+  }
+
+  return {
+    amount: amountValue,
+    date: dateValue,
+    category: categoryValue,
+    description: descriptionValue,
+  };
+};
 
 // Expense categories
 const expenseCategories = [
@@ -57,30 +244,97 @@ const expenseFormSchema = z.object({
 
 type ExpenseFormValues = z.infer<typeof expenseFormSchema>;
 
+const getDefaultExpenseValues = (): ExpenseFormValues => ({
+  amount: "",
+  category: "",
+  description: "",
+  date: new Date().toISOString().split("T")[0],
+  receipt: undefined,
+  ocrText: "",
+});
+
 export function AddExpenseDialog() {
   const [open, setOpen] = useState(false);
 
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [receiptStatus, setReceiptStatus] = useState("No receipt uploaded");
+  const [ocrStatus, setOcrStatus] = useState("Waiting for receipt image");
+  const [ocrText, setOcrText] = useState("");
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [isOcrRunning, setIsOcrRunning] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadInputId = useId();
+  const cameraInputId = useId();
 
   const { toast } = useToast();
 
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
-    defaultValues: {
-      amount: "",
-      category: "",
-      description: "",
-      date: new Date().toISOString().split("T")[0],
-      receipt: undefined,
-      ocrText: "",
-    },
+    defaultValues: getDefaultExpenseValues(),
   });
 
-  // 🔥 Placeholder for OCR future integration
-  const performOCR = async (file: File) => {
-    console.log("OCR will run here for:", file.name);
-    return ""; // will return OCR text later
+  const resetFormState = () => {
+    form.reset(getDefaultExpenseValues(), { keepDefaultValues: false });
+    setReceiptFile(null);
+    setReceiptPreview(null);
+    setReceiptStatus("No receipt uploaded");
+    setOcrStatus("Waiting for receipt image");
+    setOcrText("");
+    setOcrError(null);
+  };
+
+  const runReceiptOCR = async (file: File) => {
+    setIsOcrRunning(true);
+    setOcrStatus("Analyzing receipt…");
+    setOcrError(null);
+    try {
+      const result = await Tesseract.recognize(file, "eng", {
+        logger: (message) => {
+          if (message.progress !== undefined) {
+            const percent = Math.round(message.progress * 100);
+            setOcrStatus(`${message.status} (${percent}%)`);
+          } else {
+            setOcrStatus(message.status);
+          }
+        },
+      });
+
+      const cleanedText = result.data.text?.trim() ?? "";
+      setOcrText(cleanedText);
+      form.setValue("ocrText", cleanedText);
+      console.info("[OCR] Receipt contents:", cleanedText);
+
+      if (!cleanedText) {
+        setOcrError("No readable text detected. Try retaking the photo.");
+      } else {
+        setOcrStatus("Receipt text captured");
+        const parsed = parseReceiptDetails(cleanedText);
+
+        if (parsed.amount) {
+          form.setValue("amount", parsed.amount, { shouldDirty: true });
+        }
+
+        if (parsed.category) {
+          form.setValue("category", parsed.category, { shouldDirty: true });
+        }
+
+        if (parsed.description) {
+          form.setValue("description", parsed.description, { shouldDirty: true });
+        }
+
+        if (parsed.date) {
+          form.setValue("date", parsed.date, { shouldDirty: true });
+        }
+      }
+    } catch (error) {
+      console.error("[OCR] Failed to process receipt", error);
+      setOcrError("Failed to read receipt. Please try again.");
+      setOcrStatus("OCR failed");
+    } finally {
+      setIsOcrRunning(false);
+    }
   };
 
   const mutation = useMutation({
@@ -122,21 +376,48 @@ export function AddExpenseDialog() {
     },
   });
 
-  const onSubmit = async (data: ExpenseFormValues) => {
-    if (receiptFile) {
-      const ocrText = await performOCR(receiptFile);
-      data.ocrText = ocrText;
-    }
-
+  const onSubmit = (data: ExpenseFormValues) => {
     data.receipt = receiptFile;
     mutation.mutate(data);
   };
 
+  const handleReceiptChange = async (file: File | null) => {
+    setReceiptFile(file);
+    setReceiptPreview((previous) => {
+      if (previous) URL.revokeObjectURL(previous);
+      return file ? URL.createObjectURL(file) : null;
+    });
+    setReceiptStatus(file ? `Receipt selected: ${file.name}` : "No receipt uploaded");
+
+    if (!file) {
+      setOcrStatus("Waiting for receipt image");
+      setOcrText("");
+      setOcrError(null);
+      form.setValue("ocrText", "");
+      return;
+    }
+
+    await runReceiptOCR(file);
+  };
+
   const removeReceipt = () => {
-    setReceiptPreview(null);
-    setReceiptFile(null);
+    void handleReceiptChange(null);
     form.setValue("receipt", undefined);
   };
+
+  useEffect(() => {
+    return () => {
+      if (receiptPreview) {
+        URL.revokeObjectURL(receiptPreview);
+      }
+    };
+  }, [receiptPreview]);
+
+  useEffect(() => {
+    if (!open) {
+      resetFormState();
+    }
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -169,6 +450,8 @@ export function AddExpenseDialog() {
                       step="0.01"
                       placeholder="0.00"
                       {...field}
+                      inputMode="decimal"
+                      required
                     />
                   </FormControl>
                   <FormDescription>Enter the amount spent</FormDescription>
@@ -186,7 +469,7 @@ export function AddExpenseDialog() {
                   <FormLabel>Category *</FormLabel>
                   <Select value={field.value} onValueChange={field.onChange}>
                     <FormControl>
-                      <SelectTrigger>
+                      <SelectTrigger aria-required="true">
                         <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                     </FormControl>
@@ -212,7 +495,7 @@ export function AddExpenseDialog() {
                 <FormItem>
                   <FormLabel>Description *</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Monthly rent payment" {...field} />
+                    <Input placeholder="e.g., Monthly rent payment" {...field} required />
                   </FormControl>
                   <FormDescription>Short description of the expense</FormDescription>
                   <FormMessage />
@@ -228,7 +511,7 @@ export function AddExpenseDialog() {
                 <FormItem>
                   <FormLabel>Date *</FormLabel>
                   <FormControl>
-                    <Input type="date" {...field} />
+                    <Input type="date" {...field} required />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -242,18 +525,19 @@ export function AddExpenseDialog() {
               render={() => (
                 <FormItem>
                   <FormLabel>Receipt (optional)</FormLabel>
-                  <FormDescription>Upload from device or take a photo.</FormDescription>
+                  <FormDescription>
+                    Upload from device or take a photo. Supported formats: PNG or JPG.
+                  </FormDescription>
 
                   {/* hidden file inputs */}
                   <input
                     type="file"
                     accept="image/*"
-                    id="receipt-upload-input"
-                    className="hidden"
+                    id={uploadInputId}
+                    ref={uploadInputRef}
+                    className="sr-only"
                     onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      setReceiptFile(f);
-                      setReceiptPreview(f ? URL.createObjectURL(f) : null);
+                      void handleReceiptChange(e.target.files?.[0] ?? null);
                     }}
                   />
 
@@ -261,12 +545,11 @@ export function AddExpenseDialog() {
                     type="file"
                     accept="image/*"
                     capture="environment"
-                    id="receipt-camera-input"
-                    className="hidden"
+                    id={cameraInputId}
+                    ref={cameraInputRef}
+                    className="sr-only"
                     onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      setReceiptFile(f);
-                      setReceiptPreview(f ? URL.createObjectURL(f) : null);
+                      void handleReceiptChange(e.target.files?.[0] ?? null);
                     }}
                   />
 
@@ -274,9 +557,8 @@ export function AddExpenseDialog() {
                     <Button
                       variant="outline"
                       type="button"
-                      onClick={() =>
-                        document.getElementById("receipt-upload-input")?.click()
-                      }
+                      onClick={() => uploadInputRef.current?.click()}
+                      aria-controls={uploadInputId}
                     >
                       Upload from device
                     </Button>
@@ -284,19 +566,23 @@ export function AddExpenseDialog() {
                     <Button
                       variant="outline"
                       type="button"
-                      onClick={() =>
-                        document.getElementById("receipt-camera-input")?.click()
-                      }
+                      onClick={() => cameraInputRef.current?.click()}
+                      aria-controls={cameraInputId}
                     >
                       Use camera
                     </Button>
                   </div>
+
+                  <p className="sr-only" role="status" aria-live="polite">
+                    {receiptStatus}
+                  </p>
 
                   {receiptPreview && (
                     <div className="mt-3 relative inline-block">
                       <img
                         src={receiptPreview}
                         className="max-h-40 rounded border"
+                        alt="Receipt preview"
                       />
                       <Button
                         type="button"
@@ -304,11 +590,29 @@ export function AddExpenseDialog() {
                         size="icon"
                         className="absolute top-1 right-1 h-6 w-6"
                         onClick={removeReceipt}
+                        aria-label="Remove receipt"
                       >
-                        <Trash className="h-4 w-4" />
+                        <Trash className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </div>
                   )}
+
+                  <div className="mt-3 space-y-2" aria-live="polite">
+                    <p className="text-sm text-muted-foreground">
+                      {isOcrRunning ? `${ocrStatus}` : ocrStatus}
+                    </p>
+                    {ocrError && (
+                      <p className="text-sm text-destructive" role="alert">
+                        {ocrError}
+                      </p>
+                    )}
+                    {ocrText && (
+                      <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                        <p className="font-medium">Extracted text preview</p>
+                        <p className="mt-1 whitespace-pre-wrap">{ocrText}</p>
+                      </div>
+                    )}
+                  </div>
 
                   <FormMessage />
                 </FormItem>

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,9 @@ interface GoalCardProps {
 
 export function GoalCard({ title, current, target, deadline, status, testId }: GoalCardProps) {
   const percentage = Math.min((current / target) * 100, 100);
+  const titleId = useId();
+  const statusId = useId();
+  const progressId = useId();
 
   const statusConfig = {
     "on-track": { label: "On Track", className: "bg-green-500" },
@@ -22,15 +26,35 @@ export function GoalCard({ title, current, target, deadline, status, testId }: G
   };
 
   return (
-    <Card className="hover-elevate" data-testid={testId}>
+    <Card
+      className="hover-elevate"
+      data-testid={testId}
+      role="group"
+      aria-labelledby={titleId}
+      aria-describedby={progressId}
+    >
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-base font-medium">{title}</CardTitle>
-        <Badge variant="secondary" className={cn("text-xs", statusConfig[status].className)}>
+        <CardTitle id={titleId} className="text-base font-medium">
+          {title}
+        </CardTitle>
+        <Badge
+          id={statusId}
+          variant="secondary"
+          className={cn("text-xs text-white", statusConfig[status].className)}
+        >
           {statusConfig[status].label}
         </Badge>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Progress value={percentage} className="h-2" data-testid={`${testId}-progress`} />
+        <Progress
+          value={percentage}
+          className="h-2"
+          data-testid={`${testId}-progress`}
+          aria-describedby={statusId}
+        />
+        <p id={progressId} className="sr-only">
+          {`${title} is ${Math.round(percentage)} percent funded. $${current.toLocaleString()} saved toward a goal of $${target.toLocaleString()} due by ${deadline}. Current status: ${statusConfig[status].label}.`}
+        </p>
         <div className="flex items-end justify-between gap-2">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Progress</p>

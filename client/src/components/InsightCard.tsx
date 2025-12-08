@@ -14,8 +14,8 @@ export function InsightCard({ title, description, icon: Icon, value, testId }: I
     <Card className="hover-elevate" data-testid={testId}>
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
         <CardTitle className="text-base font-medium">{title}</CardTitle>
-        <div className="rounded-md bg-primary/10 p-2">
-          <Icon className="h-5 w-5 text-primary" />
+        <div className="rounded-md bg-primary/10 p-2" aria-hidden="true">
+          <Icon className="h-5 w-5 text-primary" aria-hidden="true" focusable="false" />
         </div>
       </CardHeader>
       <CardContent className="space-y-2">

@@ -1,4 +1,4 @@
-import { Home, Target, TrendingUp, MessageSquare } from "lucide-react";
+import { Home, Target, TrendingUp, MessageSquare, ReceiptText } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -25,6 +25,12 @@ const menuItems = [
     testId: "nav-goals",
   },
   {
+    title: "Transactions",
+    url: "/transactions",
+    icon: ReceiptText,
+    testId: "nav-transactions",
+  },
+  {
     title: "Insights",
     url: "/insights",
     icon: TrendingUp,
@@ -42,22 +48,29 @@ export function AppSidebar() {
   const location = useLocation();
 
   return (
-    <Sidebar>
+    <Sidebar role="navigation" aria-label="Primary">
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>FinWise</SidebarGroupLabel>
+        <SidebarGroup aria-label="FinWise navigation">
+          <SidebarGroupLabel aria-hidden="true">FinWise</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={location.pathname === item.url}>
-                    <Link to={item.url} data-testid={item.testId}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {menuItems.map((item) => {
+                const isActive = location.pathname === item.url;
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive}>
+                      <Link
+                        to={item.url}
+                        data-testid={item.testId}
+                        aria-current={isActive ? "page" : undefined}
+                      >
+                        <item.icon aria-hidden="true" focusable="false" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
