@@ -27,6 +27,8 @@ dist/**
 ## Firebase emulator and local files
 .firebase/
 firebase-debug.log
+*firebase-adminsdk*.json
+eng.traineddata
 
 ## Logs
 logs/

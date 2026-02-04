@@ -31,7 +31,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { getAuthHeader, queryClient } from "@/lib/queryClient";
 import Tesseract from "tesseract.js";
 
 const categoryKeywords: Record<string, string[]> = {
@@ -340,10 +340,14 @@ export function AddExpenseDialog() {
   const mutation = useMutation({
     mutationFn: async (data: ExpenseFormValues) => {
       const { receipt, ocrText, ...rest } = data;
+      const authHeader = await getAuthHeader();
 
       const response = await fetch("/api/expenses", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeader,
+        },
         body: JSON.stringify({
           ...rest,
           date: new Date(data.date),

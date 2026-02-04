@@ -24,7 +24,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { getAuthHeader, queryClient } from "@/lib/queryClient";
 
 const incomeFormSchema = z.object({
   amount: z.string().min(1, "Amount is required").refine(
@@ -54,9 +54,13 @@ export function AddIncomeDialog() {
 
   const mutation = useMutation({
     mutationFn: async (data: IncomeFormValues) => {
+      const authHeader = await getAuthHeader();
       const response = await fetch("/api/income", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeader,
+        },
         body: JSON.stringify({
           amount: data.amount,
           source: data.source,

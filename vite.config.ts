@@ -3,11 +3,9 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
+const apiPort = Number(process.env.PORT || "5000");
+
 export default defineConfig({
-  server: {
-    host: true,
-    port: 5173,
-  },
   plugins: [
     react(),
     runtimeErrorOverlay(),
@@ -36,6 +34,14 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: true,
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: `http://localhost:${apiPort}`,
+        changeOrigin: true,
+      },
+    },
     fs: {
       strict: true,
       deny: ["**/.*"],

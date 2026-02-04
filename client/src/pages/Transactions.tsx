@@ -1,5 +1,8 @@
-import { useMemo, useRef, useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, useEffect } from "react";
+import FirestoreTestButton from "@/components/FirestoreTestButton";
+import { useQueryClient } from "@tanstack/react-query";
+import { useFirestoreTransactions } from "@/hooks/useFirestoreTransactions";
+import { getAuthHeader } from "@/lib/queryClient";
 import { DateRange } from "react-day-picker";
 import { format, endOfDay, startOfDay } from "date-fns";
 import { CalendarIcon, ArrowUpDown, UploadCloud } from "lucide-react";
@@ -36,6 +39,16 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
 
 type Transaction = {
   id: string;
@@ -43,6 +56,15 @@ type Transaction = {
   description: string;
   category: string;
   amount: number;
+  type: "income" | "expense";
+};
+
+type ParsedTransactionDraft = {
+  id: string;
+  date: string;
+  description: string;
+  category: string;
+  amount: string;
   type: "income" | "expense";
 };
 
@@ -63,16 +85,10 @@ const months = [
 
 const pageSize = 10;
 
-export default function Transactions() {
-  const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const { data: expenses = [], isLoading: expensesLoading } = useQuery<Expense[]>({
-    queryKey: ["/api/expenses"],
-  });
-  const { data: income = [], isLoading: incomeLoading } = useQuery<Income[]>({
-    queryKey: ["/api/income"],
-  });
+export default function Transactions() {
+  const queryClient = useQueryClient();
+  const { transactions, loading: firestoreLoading, error } = useFirestoreTransactions();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -84,27 +100,7 @@ export default function Transactions() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
 
-  const transactions: Transaction[] = useMemo(() => {
-    const mappedExpenses: Transaction[] = expenses.map((expense) => ({
-      id: `expense-${expense.id}`,
-      date: expense.date ? new Date(expense.date).toISOString() : new Date().toISOString(),
-      description: expense.description,
-      category: expense.category,
-      amount: Number(expense.amount),
-      type: "expense",
-    }));
-
-    const mappedIncome: Transaction[] = income.map((item) => ({
-      id: `income-${item.id}`,
-      date: item.date ? new Date(item.date).toISOString() : new Date().toISOString(),
-      description: item.description,
-      category: item.source ?? "Income",
-      amount: Number(item.amount),
-      type: "income",
-    }));
-
-    return [...mappedExpenses, ...mappedIncome];
-  }, [expenses, income]);
+  // transactions now comes from Firestore
 
   const categoryOptions = useMemo(() => {
     const unique = new Set(transactions.map((txn) => txn.category));
@@ -180,21 +176,16 @@ export default function Transactions() {
     setPage(1);
   };
 
-  const handleUploadPdf = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      toast({
-        title: "Statement uploaded",
-        description: `${file.name} ready for processing.`,
-      });
-      event.target.value = "";
-    }
+  const handleImportedTransactions = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/income"] });
   };
 
-  const loading = expensesLoading || incomeLoading;
+  const loading = firestoreLoading;
 
   return (
     <div className="space-y-6" role="region" aria-labelledby="transactions-title">
+      <FirestoreTestButton />
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 id="transactions-title" className="text-3xl font-light tracking-tight">
@@ -212,24 +203,7 @@ export default function Transactions() {
             className="w-full sm:w-64"
             aria-label="Search transactions"
           />
-          <div>
-            <input
-              type="file"
-              accept="application/pdf"
-              className="sr-only"
-              ref={fileInputRef}
-              onChange={handleUploadPdf}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full sm:w-auto"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <UploadCloud className="mr-2 h-4 w-4" aria-hidden="true" />
-              Upload PDF
-            </Button>
-          </div>
+          <StatementImportDialog onImportComplete={handleImportedTransactions} />
         </div>
       </div>
 
@@ -387,6 +361,12 @@ export default function Transactions() {
                     Loading transactions...
                   </TableCell>
                 </TableRow>
+              ) : error ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-destructive">
+                    Error loading transactions: {error}
+                  </TableCell>
+                </TableRow>
               ) : paginatedTransactions.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
@@ -478,5 +458,239 @@ export default function Transactions() {
         )}
       </div>
     </div>
+  );
+}
+
+function StatementImportDialog({ onImportComplete }: { onImportComplete: () => void }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [drafts, setDrafts] = useState<ParsedTransactionDraft[]>([]);
+  const [isParsing, setIsParsing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const resetState = () => {
+    setDrafts([]);
+    setError(null);
+    setIsParsing(false);
+    setIsSaving(false);
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsParsing(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("statement", file);
+      const authHeader = await getAuthHeader();
+      const response = await fetch("/api/transactions/parse-pdf", {
+        method: "POST",
+        headers: authHeader,
+        body: formData,
+      });
+      const contentType = response.headers.get("content-type");
+      let result: any;
+      if (contentType?.includes("application/json")) {
+        result = await response.json();
+        if (!response.ok) {
+          throw new Error(result?.error ?? "Unable to parse PDF");
+        }
+      } else {
+        const text = await response.text();
+        if (!response.ok) {
+          throw new Error(text || "Unable to parse PDF");
+        }
+        try {
+          result = JSON.parse(text);
+        } catch {
+          throw new Error("Unexpected response from server. Please try again.");
+        }
+      }
+      const parsedDrafts: ParsedTransactionDraft[] = (result.transactions ?? []).map((txn: any) => ({
+        id: txn.id ?? crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+        date: txn.date ? txn.date.slice(0, 10) : "",
+        description: txn.description ?? "",
+        category: txn.category ?? "General",
+        amount: txn.amount ? String(txn.amount) : "",
+        type: txn.type === "income" ? "income" : "expense",
+      }));
+      setDrafts(parsedDrafts);
+      if (!parsedDrafts.length) {
+        setError("No transactions were detected in this statement.");
+      }
+    } catch (parseError: any) {
+      setError(parseError?.message ?? "Failed to parse PDF");
+    } finally {
+      setIsParsing(false);
+      event.target.value = "";
+    }
+  };
+
+  const updateDraft = (id: string, patch: Partial<ParsedTransactionDraft>) => {
+    setDrafts((previous) =>
+      previous.map((draft) => (draft.id === id ? { ...draft, ...patch } : draft))
+    );
+  };
+
+  const handleSaveAll = async () => {
+    if (!drafts.length) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      // Assume transactions are already written to Firestore by backend after PDF parse
+      toast({
+        title: "Transactions imported",
+        description: `${drafts.length} transaction${drafts.length === 1 ? "" : "s"} saved to Firestore!`,
+      });
+      resetState();
+      setOpen(false);
+      onImportComplete();
+    } catch (saveError: any) {
+      setError(saveError?.message ?? "Failed to save transactions");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          resetState();
+        }
+        setOpen(next);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" className="w-full sm:w-auto">
+          <UploadCloud className="mr-2 h-4 w-4" aria-hidden="true" />
+          Upload PDF
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Import statement</DialogTitle>
+          <DialogDescription>
+            Upload a bank or credit statement PDF to extract transactions automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="statement-upload" className="text-sm font-medium">
+              Statement PDF
+            </label>
+            <Input
+              id="statement-upload"
+              type="file"
+              accept="application/pdf"
+              onChange={handleFileChange}
+              aria-describedby="statement-upload-hint"
+            />
+            <p id="statement-upload-hint" className="text-sm text-muted-foreground mt-1">
+              Choose a PDF up to 10MB. Transactions will appear below for review.
+            </p>
+          </div>
+
+          {isParsing && <p className="text-sm text-muted-foreground">Parsing statement…</p>}
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+
+          {drafts.length > 0 && (
+            <div className="rounded-md border">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead scope="col">Date</TableHead>
+                      <TableHead scope="col">Description</TableHead>
+                      <TableHead scope="col">Category</TableHead>
+                      <TableHead scope="col">Amount</TableHead>
+                      <TableHead scope="col">Type</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {drafts.map((draft) => (
+                      <TableRow key={draft.id}>
+                        <TableCell>
+                          <Input
+                            type="date"
+                            value={draft.date}
+                            onChange={(event) => updateDraft(draft.id, { date: event.target.value })}
+                            aria-label="Transaction date"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={draft.description}
+                            onChange={(event) =>
+                              updateDraft(draft.id, { description: event.target.value })
+                            }
+                            aria-label="Transaction description"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={draft.category}
+                            onChange={(event) => updateDraft(draft.id, { category: event.target.value })}
+                            aria-label="Transaction category"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={draft.amount}
+                            onChange={(event) => updateDraft(draft.id, { amount: event.target.value })}
+                            aria-label="Transaction amount"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={draft.type}
+                            onValueChange={(value) =>
+                              updateDraft(draft.id, { type: value as "income" | "expense" })
+                            }
+                          >
+                            <SelectTrigger aria-label="Transaction type">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="expense">Expense</SelectItem>
+                              <SelectItem value="income">Income</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button type="button" variant="outline" onClick={resetState} disabled={isParsing || isSaving}>
+            Clear
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSaveAll}
+            disabled={isSaving || drafts.length === 0}
+            aria-live="polite"
+          >
+            {isSaving ? "Saving…" : `Save ${drafts.length || ""}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
