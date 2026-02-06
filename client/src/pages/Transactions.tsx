@@ -3,9 +3,12 @@ import FirestoreTestButton from "@/components/FirestoreTestButton";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFirestoreTransactions } from "@/hooks/useFirestoreTransactions";
 import { getAuthHeader } from "@/lib/queryClient";
+import { useAuth } from "@/contexts/AuthProvider";
+import { db } from "@/lib/firebase";
+import { doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { DateRange } from "react-day-picker";
 import { format, endOfDay, startOfDay } from "date-fns";
-import { CalendarIcon, ArrowUpDown, UploadCloud } from "lucide-react";
+import { CalendarIcon, ArrowUpDown, UploadCloud, Trash2 } from "lucide-react";
 import type { Expense, Income } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +51,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 
 type Transaction = {
@@ -61,6 +75,14 @@ type Transaction = {
 
 type ParsedTransactionDraft = {
   id: string;
+  date: string;
+  description: string;
+  category: string;
+  amount: string;
+  type: "income" | "expense";
+};
+
+type TransactionDraft = {
   date: string;
   description: string;
   category: string;
@@ -85,10 +107,27 @@ const months = [
 
 const pageSize = 10;
 
+const categoryOptionsBase = [
+  "Income",
+  "Rent",
+  "Utilities",
+  "Internet",
+  "Phone",
+  "Groceries",
+  "Transport",
+  "Dining",
+  "Shopping",
+  "Subscriptions",
+  "EMI/Loan",
+  "General",
+  "Uncategorized",
+];
+
 
 export default function Transactions() {
   const queryClient = useQueryClient();
   const { transactions, loading: firestoreLoading, error } = useFirestoreTransactions();
+  const { user } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -97,13 +136,14 @@ export default function Transactions() {
   const [yearFilter, setYearFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [sortKey, setSortKey] = useState<"date" | "amount">("date");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
+  const [drafts, setDrafts] = useState<Record<string, TransactionDraft>>({});
 
   // transactions now comes from Firestore
 
   const categoryOptions = useMemo(() => {
-    const unique = new Set(transactions.map((txn) => txn.category));
+    const unique = new Set([...categoryOptionsBase, ...transactions.map((txn) => txn.category)]);
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [transactions]);
 
@@ -137,6 +177,12 @@ export default function Transactions() {
       let comparison = 0;
       if (sortKey === "date") {
         comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+        if (comparison === 0) {
+          comparison = a.description.localeCompare(b.description);
+        }
+        if (comparison === 0) {
+          comparison = a.amount - b.amount;
+        }
       } else {
         comparison = a.amount - b.amount;
       }
@@ -160,7 +206,7 @@ export default function Transactions() {
       setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDirection("desc");
+      setSortDirection("asc");
     }
   };
 
@@ -172,13 +218,50 @@ export default function Transactions() {
     setYearFilter("all");
     setDateRange(undefined);
     setSortKey("date");
-    setSortDirection("desc");
+    setSortDirection("asc");
     setPage(1);
   };
 
   const handleImportedTransactions = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
     queryClient.invalidateQueries({ queryKey: ["/api/income"] });
+  };
+
+  const ensureDraft = (txn: Transaction) => {
+    if (drafts[txn.id]) return drafts[txn.id];
+    return {
+      date: txn.date.slice(0, 10),
+      description: txn.description,
+      category: txn.category,
+      amount: String(txn.amount),
+      type: txn.type,
+    };
+  };
+
+  const updateDraft = (id: string, patch: Partial<TransactionDraft>) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] ?? {}), ...patch },
+    }));
+  };
+
+  const persistDraft = async (id: string) => {
+    if (!user) return;
+    const draft = drafts[id];
+    if (!draft) return;
+    const payload = {
+      date: new Date(`${draft.date}T12:00:00.000Z`).toISOString(),
+      description: draft.description.trim(),
+      category: draft.category.trim() || "General",
+      amount: Number(draft.amount),
+      type: draft.type,
+    };
+    await updateDoc(doc(db, "users", user.uid, "transactions", id), payload);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!user) return;
+    await deleteDoc(doc(db, "users", user.uid, "transactions", id));
   };
 
   const loading = firestoreLoading;
@@ -195,9 +278,9 @@ export default function Transactions() {
             View and manage all your logged financial activity
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Input
-            placeholder="Search description or category..."
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Input
+          placeholder="Search description or category..."
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             className="w-full sm:w-64"
@@ -352,29 +435,32 @@ export default function Transactions() {
                   </button>
                 </TableHead>
                 <TableHead scope="col">Type</TableHead>
+                <TableHead scope="col" className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                     Loading transactions...
                   </TableCell>
                 </TableRow>
               ) : error ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-destructive">
+                  <TableCell colSpan={6} className="py-8 text-center text-destructive">
                     Error loading transactions: {error}
                   </TableCell>
                 </TableRow>
               ) : paginatedTransactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                     No transactions match your filters.
                   </TableCell>
                 </TableRow>
               ) : (
                 paginatedTransactions.map((txn) => {
+                  const draft = ensureDraft(txn);
+                  const draftId = `txn-draft-${txn.id}`;
                   const amountLabel = `${txn.type === "income" ? "income" : "expense"}`;
                   const amountFormatted = new Intl.NumberFormat(undefined, {
                     style: "currency",
@@ -387,25 +473,107 @@ export default function Transactions() {
                       aria-label={`${amountFormatted} ${amountLabel} on ${format(new Date(txn.date), "MMM d, yyyy")} for ${txn.category}`}
                       className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                     >
-                      <TableCell>{format(new Date(txn.date), "MMM d, yyyy")}</TableCell>
-                      <TableCell>{txn.description}</TableCell>
-                      <TableCell>{txn.category}</TableCell>
-                      <TableCell className={txn.type === "income" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
-                        <span aria-hidden="true">{amountFormatted}</span>
-                        <span className="sr-only">
-                          {`${amountFormatted} ${txn.type === "income" ? "income" : "expense"} for ${txn.category}`}
-                        </span>
+                      <TableCell>
+                        <Input
+                          id={`${draftId}-date`}
+                          type="date"
+                          value={draft.date}
+                          onChange={(event) => updateDraft(txn.id, { date: event.target.value })}
+                          onBlur={() => persistDraft(txn.id)}
+                          aria-label="Transaction date"
+                        />
                       </TableCell>
                       <TableCell>
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            txn.type === "income"
-                              ? "bg-green-600/10 text-green-700 dark:bg-green-500/20 dark:text-green-200"
-                              : "bg-red-600/10 text-red-700 dark:bg-red-500/20 dark:text-red-200"
-                          }`}
+                        <Input
+                          id={`${draftId}-description`}
+                          value={draft.description}
+                          onChange={(event) => updateDraft(txn.id, { description: event.target.value })}
+                          onBlur={() => persistDraft(txn.id)}
+                          aria-label="Transaction description"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={draft.category}
+                          onValueChange={(value) => {
+                            updateDraft(txn.id, { category: value });
+                            void persistDraft(txn.id);
+                          }}
                         >
-                          {txn.type === "income" ? "Income" : "Expense"}
-                        </span>
+                          <SelectTrigger
+                            id={`${draftId}-category`}
+                            className="h-10"
+                            aria-label="Transaction category"
+                          >
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categoryOptions.map((category) => (
+                              <SelectItem key={`${txn.id}-${category}`} value={category}>
+                                {category}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          id={`${draftId}-amount`}
+                          type="number"
+                          step="0.01"
+                          value={draft.amount}
+                          onChange={(event) => updateDraft(txn.id, { amount: event.target.value })}
+                          onBlur={() => persistDraft(txn.id)}
+                          aria-label="Transaction amount"
+                          className="text-right"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={draft.type}
+                          onValueChange={(value) => updateDraft(txn.id, { type: value as "income" | "expense" })}
+                        >
+                          <SelectTrigger
+                            id={`${draftId}-type`}
+                            className="h-10"
+                            aria-label="Transaction type"
+                            onBlur={() => persistDraft(txn.id)}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="income">Income</SelectItem>
+                            <SelectItem value="expense">Expense</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              aria-label="Delete transaction"
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete transaction</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently remove the transaction from your history.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDelete(txn.id)}>
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </TableCell>
                     </TableRow>
                   );

@@ -1,29 +1,45 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Wallet } from "lucide-react";
-import { signInWithGoogle } from "@/lib/firebase";
+import { signInWithEmailPassword, signInWithGoogle, signUpWithEmailPassword } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 
 export default function Login() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [user, navigate]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: Replace with actual authentication
-    console.log("Login attempt:", { email, password });
-    navigate("/dashboard");
+    try {
+      await signInWithEmailPassword({ email, password });
+      navigate("/dashboard");
+    } catch (e) {
+      console.error("Email sign-in failed", e);
+    }
   };
 
-  const handleDemoLogin = () => {
-    // Quick demo access - open for all users
-    navigate("/dashboard");
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await signUpWithEmailPassword({ email, password, name });
+      navigate("/dashboard");
+    } catch (e) {
+      console.error("Account creation failed", e);
+    }
   };
 
   const handleGoogle = async () => {
@@ -51,15 +67,35 @@ export default function Login() {
           </div>
           <div>
             <CardTitle className="text-2xl font-light tracking-tight" data-testid="text-login-title">
-              Welcome to FinWise
+              {isCreatingAccount ? "Create your FinWise account" : "Welcome to FinWise"}
             </CardTitle>
             <CardDescription className="mt-2">
-              Sign in to manage your personal finances
+              {isCreatingAccount
+                ? "Create an account to start tracking your finances"
+                : "Sign in to manage your personal finances"}
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form
+            onSubmit={isCreatingAccount ? handleCreateAccount : handleLogin}
+            className="space-y-4"
+          >
+            {isCreatingAccount && (
+              <div className="space-y-2">
+                <Label htmlFor="name">Full name</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  placeholder="Your name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  data-testid="input-name"
+                  aria-label="Full name"
+                  required
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -70,6 +106,7 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 data-testid="input-email"
                 aria-label="Email address"
+                required
               />
             </div>
             <div className="space-y-2">
@@ -82,14 +119,11 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 data-testid="input-password"
                 aria-label="Password"
+                required
               />
             </div>
-            <Button
-              type="submit"
-              className="w-full"
-              data-testid="button-login"
-            >
-              Sign In
+            <Button type="submit" className="w-full" data-testid="button-login">
+              {isCreatingAccount ? "Create Account" : "Sign In"}
             </Button>
           </form>
 
@@ -111,26 +145,17 @@ export default function Login() {
             >
               Continue with Google
             </Button>
-
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={handleDemoLogin}
-              data-testid="button-demo"
-            >
-              Continue with Demo Account
-            </Button>
           </div>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            Don't have an account?{" "}
+            {isCreatingAccount ? "Already have an account?" : "Don't have an account?"}{" "}
             <button
               type="button"
               className="font-medium text-primary hover:underline"
-              onClick={() => console.log("Sign up clicked")}
+              onClick={() => setIsCreatingAccount((prev) => !prev)}
               data-testid="link-signup"
             >
-              Sign up
+              {isCreatingAccount ? "Sign in" : "Sign up"}
             </button>
           </p>
         </CardContent>

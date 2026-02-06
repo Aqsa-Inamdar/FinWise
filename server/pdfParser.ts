@@ -33,8 +33,10 @@ export type ParsedStatementTransaction = {
   type: "income" | "expense";
 };
 
-const LINE_REGEX = /(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\s+(.+?)\s+([+-]?\$?\d[\d,]*\.\d{2})$/;
-const ENTRY_START_REGEX = /^(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\s+(.+)/;
+const LINE_REGEX =
+  /(\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\s+(.+?)\s+([+-]?\$?\d[\d,]*\.\d{2})$/;
+const ENTRY_START_REGEX =
+  /^(\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\s+(.+)/;
 const DATE_NAME_START_REGEX = /^(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{2,4}))?\s+(.+)/;
 const DATE_NAME_END_REGEX = /^(.+?)\s+(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{2,4}))?$/;
 const AMOUNT_ONLY_REGEX = /^([+-]?\$?\s?\d[\d,]*\.\d{2})$/;
@@ -54,6 +56,19 @@ const categoryKeywords: Record<string, string[]> = {
   transport: ["uber", "lyft", "gas", "fuel", "shell", "chevron", "transport"],
   income: ["salary", "payroll", "deposit", "paycheck", "direct deposit"],
 };
+const knownCategoryLabels = [
+  "Income",
+  "Rent",
+  "Utilities",
+  "Internet",
+  "Phone",
+  "Groceries",
+  "Transport",
+  "Dining",
+  "Shopping",
+  "General",
+  "Uncategorized",
+];
 
 export async function extractTransactionsFromPdf(buffer: Buffer): Promise<ParsedStatementTransaction[]> {
   if (!PdfParseConstructor) throw new Error("PDFParseConstructor is undefined");
@@ -78,7 +93,8 @@ export async function extractTransactionsFromPdf(buffer: Buffer): Promise<Parsed
 }
 
 function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
-  const lines = text
+  const normalizedText = text.replace(/(\S)\s+(?=\d{4}-\d{2}-\d{2}\b)/g, "$1\n");
+  const lines = normalizedText
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -92,7 +108,14 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
 
     if (match) {
       const [, dateRaw, rawDescription, rawAmount] = match;
-      const maybeTransaction = buildTransaction(dateRaw, rawDescription, rawAmount, defaultYear);
+      const parsedParts = splitDescriptionAndCategory(rawDescription);
+      const maybeTransaction = buildTransaction(
+        dateRaw,
+        parsedParts.description,
+        rawAmount,
+        defaultYear,
+        parsedParts.category
+      );
       if (maybeTransaction) {
         transactions.push(maybeTransaction);
       }
@@ -114,7 +137,14 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
 
         const amountCandidate = pickAmountFromLine(nextLine);
         if (amountCandidate) {
-          const maybeTransaction = buildTransaction(dateRaw, description, amountCandidate, defaultYear);
+          const parsedParts = splitDescriptionAndCategory(description);
+          const maybeTransaction = buildTransaction(
+            dateRaw,
+            parsedParts.description,
+            amountCandidate,
+            defaultYear,
+            parsedParts.category
+          );
           if (maybeTransaction) {
             transactions.push(maybeTransaction);
             index = lookahead;
@@ -126,7 +156,7 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
           break;
         }
 
-        description += " " + normalizeDescription(nextLine);
+        description = mergeDescription(description, normalizeDescription(nextLine));
         lookahead += 1;
       }
       continue;
@@ -146,7 +176,14 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
         }
         const amountCandidate = pickAmountFromLine(nextLine);
         if (amountCandidate) {
-          const maybeTransaction = buildTransaction(dateRaw, description, amountCandidate, defaultYear);
+          const parsedParts = splitDescriptionAndCategory(description);
+          const maybeTransaction = buildTransaction(
+            dateRaw,
+            parsedParts.description,
+            amountCandidate,
+            defaultYear,
+            parsedParts.category
+          );
           if (maybeTransaction) {
             transactions.push(maybeTransaction);
             index = lookahead;
@@ -156,7 +193,7 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
         if (DATE_NAME_START_REGEX.test(nextLine) || ENTRY_START_REGEX.test(nextLine)) {
           break;
         }
-        description += " " + normalizeDescription(nextLine);
+        description = mergeDescription(description, normalizeDescription(nextLine));
         lookahead += 1;
       }
       continue;
@@ -166,10 +203,17 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
     if (nameDateEndMatch) {
       const [, rawDescription, day, month, yearMaybe] = nameDateEndMatch;
       const dateRaw = [day, month, yearMaybe].filter(Boolean).join(" ");
-      const description = normalizeDescription(rawDescription);
+      const parsedParts = splitDescriptionAndCategory(rawDescription);
+      const description = parsedParts.description;
       const amountCandidate = pickAmountFromLine(line);
       if (amountCandidate) {
-        const maybeTransaction = buildTransaction(dateRaw, description, amountCandidate, defaultYear);
+        const maybeTransaction = buildTransaction(
+          dateRaw,
+          description,
+          amountCandidate,
+          defaultYear,
+          parsedParts.category
+        );
         if (maybeTransaction) {
           transactions.push(maybeTransaction);
         }
@@ -188,7 +232,8 @@ function buildTransaction(
   dateRaw: string,
   rawDescription: string,
   rawAmount: string,
-  defaultYear?: number
+  defaultYear?: number,
+  categoryOverride?: string
 ) {
   const normalizedAmount = Number(rawAmount.replace(/[,$\s]/g, ""));
   if (Number.isNaN(normalizedAmount)) return null;
@@ -198,7 +243,7 @@ function buildTransaction(
   const transactionDate = normalizeDate(dateRaw, defaultYear);
   const type: "income" | "expense" = normalizedAmount >= 0 ? "income" : "expense";
   const amount = Math.abs(normalizedAmount);
-  const category = inferCategory(description, type);
+  const category = categoryOverride ?? inferCategory(description, type);
 
   return {
     id: randomUUID(),
@@ -211,18 +256,43 @@ function buildTransaction(
 }
 
 function normalizeDate(date: string, defaultYear?: number): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const parsed = new Date(`${date}T12:00:00.000Z`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
   const nameMatch = date.match(/^(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{2,4}))?/);
   if (nameMatch) {
     const [, dayRaw, monthRaw, yearRaw] = nameMatch;
     const month = monthNameToIndex(monthRaw);
     const year = yearRaw ? normalizeYear(yearRaw) : defaultYear ?? new Date().getFullYear();
     if (month !== null) {
-      const parsed = new Date(Date.UTC(year, month, Number(dayRaw)));
+      const parsed = new Date(Date.UTC(year, month, Number(dayRaw), 12));
       if (!Number.isNaN(parsed.getTime())) {
         return parsed.toISOString();
       }
     }
   }
+  const numericMatch = date.match(/^(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?$/);
+  if (numericMatch) {
+    const [, aRaw, bRaw, yearRaw] = numericMatch;
+    const a = Number(aRaw);
+    const b = Number(bRaw);
+    let month = a;
+    let day = b;
+    if (a > 12 && b <= 12) {
+      // interpret as DD/MM when first number cannot be month
+      day = a;
+      month = b;
+    }
+    const year = yearRaw ? normalizeYear(yearRaw) : defaultYear ?? new Date().getFullYear();
+    const parsed = new Date(Date.UTC(year, month - 1, day, 12));
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
   const parsed = new Date(date);
   if (Number.isNaN(parsed.getTime())) {
     return new Date().toISOString();
@@ -231,7 +301,46 @@ function normalizeDate(date: string, defaultYear?: number): string {
 }
 
 function normalizeDescription(description: string): string {
-  return description.replace(/\s{2,}/g, " ").trim();
+  const cleaned = description.replace(/\s{2,}/g, " ").trim();
+  if (!cleaned) return cleaned;
+  const words = cleaned.split(" ");
+  const deduped: string[] = [];
+  for (const word of words) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && prev.toLowerCase() === word.toLowerCase()) {
+      continue;
+    }
+    deduped.push(word);
+  }
+  return deduped.join(" ").trim();
+}
+
+function mergeDescription(current: string, next: string): string {
+  if (!current) return next;
+  if (!next) return current;
+  const currentWords = current.split(" ");
+  const nextWords = next.split(" ");
+  const lastCurrent = currentWords[currentWords.length - 1]?.toLowerCase();
+  const firstNext = nextWords[0]?.toLowerCase();
+  if (lastCurrent && firstNext && lastCurrent === firstNext) {
+    nextWords.shift();
+  }
+  return normalizeDescription(`${current} ${nextWords.join(" ")}`);
+}
+
+function splitDescriptionAndCategory(raw: string): { description: string; category?: string } {
+  const normalized = normalizeDescription(raw);
+  const normalizedLower = normalized.toLowerCase();
+  const match = knownCategoryLabels.find(
+    (label) =>
+      normalizedLower === label.toLowerCase() ||
+      normalizedLower.endsWith(` ${label.toLowerCase()}`)
+  );
+  if (!match) {
+    return { description: normalized };
+  }
+  const description = normalized.replace(new RegExp(`\\s*${match}$`, "i"), "").trim();
+  return { description: description || normalized, category: match };
 }
 
 function inferCategory(description: string, type: "income" | "expense"): string {

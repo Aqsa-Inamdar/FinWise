@@ -42,6 +42,7 @@ const categoryKeywords: Record<string, string[]> = {
   utilities: ["utility", "electric", "water", "internet", "wifi", "power", "gas bill"],
   healthcare: ["clinic", "pharmacy", "doctor", "hospital", "medical", "dentist"],
   shopping: ["store", "market", "shop", "retail", "mall", "purchase"],
+  emi_loan: ["emi", "loan", "mortgage payment", "installment"],
 };
 
 const toIsoDate = (value: Date) => {
@@ -227,8 +228,12 @@ const expenseCategories = [
   { value: "transportation", label: "Transportation" },
   { value: "entertainment", label: "Entertainment" },
   { value: "utilities", label: "Utilities" },
-  { value: "healthcare", label: "Healthcare" },
+  { value: "internet", label: "Internet" },
+  { value: "phone", label: "Phone" },
   { value: "shopping", label: "Shopping" },
+  { value: "subscriptions", label: "Subscriptions" },
+  { value: "emi_loan", label: "EMI/Loan" },
+  { value: "healthcare", label: "Healthcare" },
   { value: "other", label: "Other" },
 ];
 
