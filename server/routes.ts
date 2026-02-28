@@ -213,6 +213,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     currentAmount: z
       .preprocess((value) => (value === "" || value == null ? undefined : value), z.coerce.number().min(0))
       .optional(),
+    allocationOverride: z
+      .union([
+        z.null(),
+        z.preprocess((value) => (value === "" || value == null ? undefined : value), z.coerce.number().min(0)),
+      ])
+      .optional(),
     deadline: z
       .string()
       .min(1)
@@ -223,6 +229,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const goalUpdateSchema = goalInputSchema.partial();
+
+  type AllocatedGoal = GoalDoc & { savingsLeftAfterGoal: number };
+
+  const allocateSavingsByDeadline = (goals: GoalDoc[], totalSavings: number): AllocatedGoal[] => {
+    const availablePool = Math.max(0, totalSavings);
+    let remainingPool = availablePool;
+
+    // Allocate finite deadlines first, then goals without valid deadlines.
+    const sorted = [...goals].sort((a, b) => {
+      const aTime = new Date(a.deadline).getTime();
+      const bTime = new Date(b.deadline).getTime();
+      const aValid = Number.isFinite(aTime);
+      const bValid = Number.isFinite(bTime);
+      if (aValid && bValid) return aTime - bTime;
+      if (aValid) return -1;
+      if (bValid) return 1;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+
+    return sorted.map((goal) => {
+      const target = Number(goal.targetAmount) || 0;
+      const hasOverride = goal.allocationOverride != null;
+      const overrideRaw = hasOverride ? Number(goal.allocationOverride) : 0;
+      const validOverride = hasOverride && Number.isFinite(overrideRaw) && overrideRaw >= 0;
+      const requested = validOverride ? Math.min(target, overrideRaw) : target;
+      const allocated = Math.min(Math.max(0, requested), Math.max(0, remainingPool));
+      remainingPool -= allocated;
+      return {
+        ...goal,
+        currentAmount: allocated,
+        savingsLeftAfterGoal: Math.max(0, remainingPool),
+      };
+    });
+  };
 
   // Goal routes (Firestore)
   app.post("/api/goals", async (req, res) => {
@@ -236,6 +276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: parsed.name,
         targetAmount: parsed.targetAmount,
         currentAmount: computedCurrentAmount,
+        allocationOverride: parsed.allocationOverride ?? null,
         deadline: parsed.deadline,
         category: parsed.category ?? null,
         createdAt: nowIso,
@@ -253,19 +294,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { userId } = req as Request & { userId: string };
       const goals = await fetchGoals(userId);
       const computedCurrentAmount = await fetchUserNetSavings(userId);
+      const allocatedGoals = allocateSavingsByDeadline(goals, computedCurrentAmount);
       const enriched = await Promise.all(
-        goals.map(async (goal) => {
-          const goalWithComputedSavings: GoalDoc = {
-            ...goal,
-            currentAmount: computedCurrentAmount,
-          };
+        allocatedGoals.map(async (goalWithComputedSavings) => {
           return {
             ...goalWithComputedSavings,
             projection: await buildGoalProjection(userId, goalWithComputedSavings),
           };
         })
       );
-      res.json({ goals: enriched });
+      res.json({ goals: enriched, totalSavingsPool: Math.max(0, computedCurrentAmount) });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -276,15 +314,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       const parsed = goalUpdateSchema.parse(req.body);
       const goals = await fetchGoals(userId);
-      const computedCurrentAmount = await fetchUserNetSavings(userId);
       const existing = goals.find((goal) => goal.id === req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Goal not found" });
       }
+      const { currentAmount: _ignoredCurrentAmount, ...safeParsed } = parsed;
       const updated: GoalDoc = {
         ...existing,
-        ...parsed,
-        currentAmount: computedCurrentAmount,
+        ...safeParsed,
         updatedAt: new Date().toISOString(),
       };
       await upsertGoal(userId, updated);

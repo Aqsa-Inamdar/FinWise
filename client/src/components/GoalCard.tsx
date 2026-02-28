@@ -2,11 +2,13 @@ import { useId } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface GoalCardProps {
   title: string;
   current: number;
+  savingsLeftAfterGoal?: number | null;
   target: number;
   deadline: string;
   status: "on-track" | "approaching" | "behind";
@@ -14,12 +16,15 @@ interface GoalCardProps {
   projectedCompletionDate?: string | null;
   statusMessage?: string | null;
   explainability?: Array<{ label: string; impact: "positive" | "negative" | "neutral"; detail: string }>;
+  onEdit?: () => void;
+  onDelete?: () => void;
   testId?: string;
 }
 
 export function GoalCard({
   title,
   current,
+  savingsLeftAfterGoal,
   target,
   deadline,
   status,
@@ -27,9 +32,15 @@ export function GoalCard({
   projectedCompletionDate,
   statusMessage,
   explainability,
+  onEdit,
+  onDelete,
   testId,
 }: GoalCardProps) {
-  const percentage = Math.min((current / target) * 100, 100);
+  const safeTarget = Math.max(0, target);
+  const allocated = Math.min(Math.max(0, current), safeTarget);
+  const percentage = safeTarget > 0 ? Math.min((allocated / safeTarget) * 100, 100) : 0;
+  const remaining = Math.max(0, safeTarget - allocated);
+  const poolLeft = Math.max(0, savingsLeftAfterGoal ?? 0);
   const titleId = useId();
   const statusId = useId();
   const progressId = useId();
@@ -68,24 +79,30 @@ export function GoalCard({
           aria-describedby={statusId}
         />
         <p id={progressId} className="sr-only">
-          {`${title} is ${Math.round(percentage)} percent funded. $${current.toLocaleString()} saved toward a goal of $${target.toLocaleString()} due by ${deadline}. Current status: ${statusConfig[status].label}.`}
+          {`${title} is ${Math.round(percentage)} percent funded. $${allocated.toLocaleString()} allocated toward a goal of $${safeTarget.toLocaleString()} due by ${deadline}. Current status: ${statusConfig[status].label}.`}
         </p>
         <div className="flex items-end justify-between gap-2">
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Progress</p>
+            <p className="text-xs text-muted-foreground">Savings left after this goal</p>
             <p className="font-mono text-lg font-semibold" data-testid={`${testId}-current`}>
-              ${current.toLocaleString()}
+              ${poolLeft.toLocaleString()}
             </p>
           </div>
           <div className="space-y-1 text-right">
-            <p className="text-xs text-muted-foreground">Goal</p>
+            <p className="text-xs text-muted-foreground">Goal target</p>
             <p className="font-mono text-lg font-semibold text-muted-foreground" data-testid={`${testId}-target`}>
-              ${target.toLocaleString()}
+              ${safeTarget.toLocaleString()}
             </p>
           </div>
         </div>
+        <p className="text-xs text-muted-foreground" data-testid={`${testId}-allocated`}>
+          Allocated to this goal: ${allocated.toLocaleString()}
+        </p>
         <p className="text-xs text-muted-foreground" data-testid={`${testId}-deadline`}>
           Deadline: {deadline}
+        </p>
+        <p className="text-xs text-muted-foreground" data-testid={`${testId}-remaining`}>
+          Remaining to complete: ${remaining.toLocaleString()}
         </p>
         {typeof probabilityAchievableByDeadline === "number" && (
           <p className="text-xs text-muted-foreground" data-testid={`${testId}-probability`}>
@@ -113,6 +130,20 @@ export function GoalCard({
                 {item.label}: {item.detail}
               </p>
             ))}
+          </div>
+        )}
+        {(onEdit || onDelete) && (
+          <div className="flex gap-2 border-t pt-2">
+            {onEdit && (
+              <Button variant="outline" size="sm" onClick={onEdit} data-testid={`${testId}-edit`}>
+                Edit
+              </Button>
+            )}
+            {onDelete && (
+              <Button variant="destructive" size="sm" onClick={onDelete} data-testid={`${testId}-delete`}>
+                Delete
+              </Button>
+            )}
           </div>
         )}
       </CardContent>

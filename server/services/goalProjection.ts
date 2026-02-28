@@ -12,6 +12,7 @@ export type GoalDoc = {
   name: string;
   targetAmount: number;
   currentAmount: number;
+  allocationOverride?: number | null;
   deadline: string; // ISO date
   category?: string | null;
   createdAt: string;
