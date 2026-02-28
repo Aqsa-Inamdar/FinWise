@@ -10,10 +10,25 @@ interface GoalCardProps {
   target: number;
   deadline: string;
   status: "on-track" | "approaching" | "behind";
+  probabilityAchievableByDeadline?: number | null;
+  projectedCompletionDate?: string | null;
+  statusMessage?: string | null;
+  explainability?: Array<{ label: string; impact: "positive" | "negative" | "neutral"; detail: string }>;
   testId?: string;
 }
 
-export function GoalCard({ title, current, target, deadline, status, testId }: GoalCardProps) {
+export function GoalCard({
+  title,
+  current,
+  target,
+  deadline,
+  status,
+  probabilityAchievableByDeadline,
+  projectedCompletionDate,
+  statusMessage,
+  explainability,
+  testId,
+}: GoalCardProps) {
   const percentage = Math.min((current / target) * 100, 100);
   const titleId = useId();
   const statusId = useId();
@@ -72,6 +87,34 @@ export function GoalCard({ title, current, target, deadline, status, testId }: G
         <p className="text-xs text-muted-foreground" data-testid={`${testId}-deadline`}>
           Deadline: {deadline}
         </p>
+        {typeof probabilityAchievableByDeadline === "number" && (
+          <p className="text-xs text-muted-foreground" data-testid={`${testId}-probability`}>
+            Achievability probability: {(probabilityAchievableByDeadline * 100).toFixed(1)}%
+          </p>
+        )}
+        {projectedCompletionDate && (
+          <p className="text-xs text-muted-foreground" data-testid={`${testId}-projected-completion`}>
+            Projected completion: {projectedCompletionDate}
+          </p>
+        )}
+        {statusMessage && (
+          <p className="text-xs text-muted-foreground" data-testid={`${testId}-status-message`}>
+            {statusMessage}
+          </p>
+        )}
+        {explainability && explainability.length > 0 && (
+          <div className="space-y-1 border-t pt-2">
+            {explainability.slice(0, 2).map((item, index) => (
+              <p
+                key={`${item.label}-${index}`}
+                className="text-xs text-muted-foreground"
+                data-testid={`${testId}-explainability-${index}`}
+              >
+                {item.label}: {item.detail}
+              </p>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

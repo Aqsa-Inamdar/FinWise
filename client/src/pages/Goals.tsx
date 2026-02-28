@@ -1,43 +1,43 @@
-import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
 import { GoalCard } from "@/components/GoalCard";
+import { useQuery } from "@tanstack/react-query";
+import { AddGoalDialog } from "@/components/AddGoalDialog";
+
+type GoalProjectionResponse = {
+  predictedMonthlySavings: number | null;
+  projectedCompletionDate: string | null;
+  status: "on_track" | "behind" | "at_risk" | "insufficient_data";
+  contract?: {
+    achievableByDeadline: boolean | null;
+    probabilityAchievableByDeadline: number | null;
+    projectedGoalBalanceAtDeadline: number | null;
+    predictedCompletionDate: string | null;
+    statusMessage: string;
+    explainability: Array<{ label: string; impact: "positive" | "negative" | "neutral"; detail: string }>;
+  };
+};
+
+type GoalResponse = {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  deadline: string;
+  projection?: GoalProjectionResponse;
+};
+
+const mapStatus = (
+  status?: GoalProjectionResponse["status"],
+): "on-track" | "approaching" | "behind" => {
+  if (status === "on_track") return "on-track";
+  if (status === "at_risk") return "approaching";
+  return "behind";
+};
 
 export default function Goals() {
-  // TODO: remove mock data
-  const goals = [
-    {
-      id: "1",
-      title: "Emergency Fund",
-      current: 8500,
-      target: 10000,
-      deadline: "Dec 31, 2025",
-      status: "on-track" as const,
-    },
-    {
-      id: "2",
-      title: "Vacation to Europe",
-      current: 2800,
-      target: 5000,
-      deadline: "Jun 15, 2026",
-      status: "on-track" as const,
-    },
-    {
-      id: "3",
-      title: "New Laptop",
-      current: 600,
-      target: 1500,
-      deadline: "Mar 30, 2025",
-      status: "behind" as const,
-    },
-    {
-      id: "4",
-      title: "Home Down Payment",
-      current: 15000,
-      target: 50000,
-      deadline: "Dec 31, 2026",
-      status: "approaching" as const,
-    },
-  ];
+  const { data, isLoading, error } = useQuery<{ goals: GoalResponse[] }>({
+    queryKey: ["/api/goals"],
+  });
+  const goals = data?.goals ?? [];
 
   return (
     <div className="space-y-6">
@@ -50,24 +50,44 @@ export default function Goals() {
             Track your progress towards financial milestones
           </p>
         </div>
-        <Button data-testid="button-add-goal" onClick={() => console.log("Add goal clicked")}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Goal
-        </Button>
+        <AddGoalDialog />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {goals.map((goal) => (
-          <GoalCard
-            key={goal.id}
-            title={goal.title}
-            current={goal.current}
-            target={goal.target}
-            deadline={goal.deadline}
-            status={goal.status}
-            testId={`goal-${goal.id}`}
-          />
-        ))}
+        {isLoading && <p className="text-sm text-muted-foreground">Loading goals...</p>}
+        {error && (
+          <p className="text-sm text-red-600">Unable to load goals. Please refresh and try again.</p>
+        )}
+        {!isLoading && !error && goals.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No goals yet. Use Add Goal to start tracking.
+          </p>
+        )}
+        {!isLoading &&
+          !error &&
+          goals.map((goal) => (
+            <GoalCard
+              key={goal.id}
+              title={goal.name}
+              current={goal.currentAmount}
+              target={goal.targetAmount}
+              deadline={new Date(goal.deadline).toLocaleDateString()}
+              status={mapStatus(goal.projection?.status)}
+              probabilityAchievableByDeadline={
+                goal.projection?.contract?.probabilityAchievableByDeadline ?? null
+              }
+              projectedCompletionDate={
+                goal.projection?.contract?.predictedCompletionDate
+                  ? new Date(goal.projection.contract.predictedCompletionDate).toLocaleDateString()
+                  : goal.projection?.projectedCompletionDate
+                    ? new Date(goal.projection.projectedCompletionDate).toLocaleDateString()
+                    : null
+              }
+              statusMessage={goal.projection?.contract?.statusMessage ?? null}
+              explainability={goal.projection?.contract?.explainability ?? []}
+              testId={`goal-${goal.id}`}
+            />
+          ))}
       </div>
     </div>
   );

@@ -41,19 +41,19 @@ export const insertExpenseSchema = createInsertSchema(expenses).omit({ id: true 
 export const insertIncomeSchema = createInsertSchema(income).omit({ id: true });
 export const insertGoalSchema = createInsertSchema(goals).omit({ id: true });
 
-export const insightCardSchema = z.object({
+export const insightSchema = z.object({
   id: z.string(),
+  type: z.enum(["risk", "positive", "neutral", "data_quality", "executive_summary"]),
   title: z.string(),
-  description: z.string(),
-  value: z.string().optional(),
-  reasoning: z.array(z.string()),
-  scope: z.enum(["global", "category"]),
+  message: z.string(),
+  severity: z.enum(["low", "medium", "high"]),
+  recommendation: z.string().optional(),
 });
 
 export const insightSnapshotSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/),
   generatedAt: z.string(),
-  insights: z.array(insightCardSchema),
+  insights: z.array(insightSchema),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -64,5 +64,5 @@ export type InsertIncome = z.infer<typeof insertIncomeSchema>;
 export type Income = typeof income.$inferSelect;
 export type InsertGoal = z.infer<typeof insertGoalSchema>;
 export type Goal = typeof goals.$inferSelect;
-export type InsightCard = z.infer<typeof insightCardSchema>;
+export type Insight = z.infer<typeof insightSchema>;
 export type InsightSnapshot = z.infer<typeof insightSnapshotSchema>;

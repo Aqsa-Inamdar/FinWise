@@ -11,3 +11,4 @@ if (!getApps().length) {
 }
 
 export const firestore = getFirestore();
+firestore.settings({ ignoreUndefinedProperties: true });

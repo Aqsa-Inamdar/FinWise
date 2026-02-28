@@ -1,15 +1,31 @@
 import type { Express, NextFunction, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertExpenseSchema, insertIncomeSchema, insertGoalSchema } from "@shared/schema";
+import { insertExpenseSchema, insertIncomeSchema } from "@shared/schema";
 import multer from "multer";
 import { extractTransactionsFromPdf } from "./pdfParser";
-import { buildMonthlyInsights } from "./insights";
+import { buildMonthlyInsights, prioritizeInsights } from "./insights";
+import { buildBehavioralProfile } from "./behavioralEngine";
+import { runSpendingVariabilityInsight } from "./services/spendingVariability";
 import { insightSnapshotSchema } from "@shared/schema";
 import { firestore } from "./firebaseAdmin";
 import { getAuth } from "firebase-admin/auth";
+import { z } from "zod";
+import { randomUUID } from "crypto";
+import {
+  buildGoalProjection,
+  deleteGoal,
+  fetchGoals,
+  fetchUserNetSavings,
+  upsertGoal,
+  type GoalDoc,
+} from "./services/goalProjection";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  const getUserId = (req: Request): string => {
+    return (req as unknown as Request & { userId: string }).userId;
+  };
+
   const authenticateRequest = async (req: Request, res: Response, next: NextFunction) => {
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) {
@@ -189,15 +205,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Goal routes
+  const goalInputSchema = z.object({
+    name: z.string().min(1),
+    targetAmount: z.coerce.number().positive(),
+    // Backward compatibility: older clients may still send currentAmount.
+    // We ignore it and always compute server-side from transactions.
+    currentAmount: z
+      .preprocess((value) => (value === "" || value == null ? undefined : value), z.coerce.number().min(0))
+      .optional(),
+    deadline: z
+      .string()
+      .min(1)
+      .refine((value) => !Number.isNaN(new Date(value).getTime()), {
+        message: "Deadline must be a valid date.",
+      }),
+    category: z.string().optional().nullable(),
+  });
+
+  const goalUpdateSchema = goalInputSchema.partial();
+
+  // Goal routes (Firestore)
   app.post("/api/goals", async (req, res) => {
     try {
       const { userId } = req as Request & { userId: string };
-      const data = insertGoalSchema.parse({
-        ...req.body,
-        userId,
-      });
-      const goal = await storage.createGoal(data);
+      const parsed = goalInputSchema.parse(req.body);
+      const nowIso = new Date().toISOString();
+      const computedCurrentAmount = await fetchUserNetSavings(userId);
+      const goal: GoalDoc = {
+        id: randomUUID(),
+        name: parsed.name,
+        targetAmount: parsed.targetAmount,
+        currentAmount: computedCurrentAmount,
+        deadline: parsed.deadline,
+        category: parsed.category ?? null,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      await upsertGoal(userId, goal);
       res.json(goal);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -207,8 +251,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/goals", async (req, res) => {
     try {
       const { userId } = req as Request & { userId: string };
-      const goals = await storage.getGoalsByUserId(userId);
-      res.json(goals);
+      const goals = await fetchGoals(userId);
+      const computedCurrentAmount = await fetchUserNetSavings(userId);
+      const enriched = await Promise.all(
+        goals.map(async (goal) => {
+          const goalWithComputedSavings: GoalDoc = {
+            ...goal,
+            currentAmount: computedCurrentAmount,
+          };
+          return {
+            ...goalWithComputedSavings,
+            projection: await buildGoalProjection(userId, goalWithComputedSavings),
+          };
+        })
+      );
+      res.json({ goals: enriched });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -216,25 +273,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/goals/:id", async (req, res) => {
     try {
-      const goal = await storage.updateGoal(req.params.id, req.body);
-      if (goal) {
-        res.json(goal);
-      } else {
-        res.status(404).json({ error: "Goal not found" });
+      const userId = getUserId(req);
+      const parsed = goalUpdateSchema.parse(req.body);
+      const goals = await fetchGoals(userId);
+      const computedCurrentAmount = await fetchUserNetSavings(userId);
+      const existing = goals.find((goal) => goal.id === req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Goal not found" });
       }
+      const updated: GoalDoc = {
+        ...existing,
+        ...parsed,
+        currentAmount: computedCurrentAmount,
+        updatedAt: new Date().toISOString(),
+      };
+      await upsertGoal(userId, updated);
+      res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(400).json({ error: error.message });
     }
   });
 
   app.delete("/api/goals/:id", async (req, res) => {
     try {
-      const success = await storage.deleteGoal(req.params.id);
-      if (success) {
-        res.json({ success: true });
-      } else {
-        res.status(404).json({ error: "Goal not found" });
-      }
+      const userId = getUserId(req);
+      await deleteGoal(userId, req.params.id);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -245,8 +309,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     upload.single("statement"),
     async (req, res, next) => {
       try {
-        interface MulterRequest extends Express.Request {
-          file?: Express.Multer.File;
+        interface MulterRequest extends Request {
+          file?: {
+            buffer: Buffer;
+            size: number;
+          };
         }
         const mReq = req as MulterRequest;
         const { userId, userName, userEmail } = req as Request & {
@@ -318,7 +385,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const data = snapshot.data();
           const parsed = insightSnapshotSchema.safeParse(data);
           if (parsed.success) {
-            return res.json(parsed.data);
+            const hasExecutive = parsed.data.insights.some(
+              (insight) => insight.type === "executive_summary"
+            );
+            if (hasExecutive) {
+              return res.json(parsed.data);
+            }
           }
         }
       }
@@ -328,9 +400,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const monthIndex = Number(monthRaw) - 1;
       const start = new Date(Date.UTC(year, monthIndex, 1));
       const end = new Date(Date.UTC(year, monthIndex + 1, 1));
-      const prevStart = new Date(Date.UTC(year, monthIndex - 1, 1));
+      const sixMonthsBack = new Date(Date.UTC(year, monthIndex - 6, 1));
 
-      const startIso = prevStart.toISOString();
+      const startIso = sixMonthsBack.toISOString();
       const endIso = end.toISOString();
 
       const transactionsSnapshot = await firestore
@@ -350,12 +422,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         type: "income" | "expense";
       }>;
 
-      const insightsSnapshot = buildMonthlyInsights(monthKey, transactions);
+      const behavioralProfile = await buildBehavioralProfile(userId, monthKey);
+      const insightsSnapshot = buildMonthlyInsights(monthKey, transactions, behavioralProfile);
+
+      const variabilityInsight = await runSpendingVariabilityInsight(userId, monthKey);
+      if (variabilityInsight) {
+        insightsSnapshot.insights = prioritizeInsights([
+          ...insightsSnapshot.insights,
+          variabilityInsight,
+        ]);
+      }
+
       await insightsRef.set(insightsSnapshot, { merge: true });
 
       return res.json(insightsSnapshot);
     } catch (error: any) {
       return res.status(500).json({ error: error?.message ?? "Failed to build insights." });
+    }
+  });
+
+  app.get("/api/behavioral-profile", async (req, res) => {
+    try {
+      const { userId } = req as Request & { userId: string };
+      const monthParam = typeof req.query.month === "string" ? req.query.month : "";
+      const now = new Date();
+      const defaultMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+      const monthKey = monthParam || defaultMonth;
+      if (!/^\d{4}-\d{2}$/.test(monthKey)) {
+        return res.status(400).json({ error: "Month must be in YYYY-MM format." });
+      }
+      const profile = await buildBehavioralProfile(userId, monthKey);
+      return res.json(profile);
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to build behavioral profile." });
     }
   });
 

@@ -20,17 +20,30 @@ interface TrendData {
 interface TrendChartProps {
   data: TrendData[];
   title?: string;
+  showIncome?: boolean;
+  showExpenses?: boolean;
 }
 
-export function TrendChart({ data, title = "Income vs Expenses Trend" }: TrendChartProps) {
+export function TrendChart({
+  data,
+  title = "Income vs Expenses Trend",
+  showIncome = true,
+  showExpenses = true,
+}: TrendChartProps) {
   const headingId = useId();
   const descriptionId = useId();
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
+      const filtered = payload.filter((entry: any) => {
+        if (entry.dataKey === "income") return showIncome;
+        if (entry.dataKey === "expenses") return showExpenses;
+        return true;
+      });
+      if (!filtered.length) return null;
       return (
         <div className="rounded-md border bg-popover p-3 shadow-md">
-          <p className="mb-1 text-sm font-medium">{payload[0].payload.month}</p>
-          {payload.map((entry: any, index: number) => (
+          <p className="mb-1 text-sm font-medium">{filtered[0].payload.month}</p>
+          {filtered.map((entry: any, index: number) => (
             <p key={index} className="text-sm" style={{ color: entry.color }}>
               {entry.name}: ${entry.value.toLocaleString()}
             </p>
@@ -46,7 +59,9 @@ export function TrendChart({ data, title = "Income vs Expenses Trend" }: TrendCh
   const maxIncome = data.length ? Math.max(...data.map((item) => item.income)) : 0;
   const maxExpenses = data.length ? Math.max(...data.map((item) => item.expenses)) : 0;
   const chartSummary = data.length
-    ? `Income and expenses from ${firstMonth} through ${lastMonth}. Peak income $${maxIncome.toLocaleString()} and peak expenses $${maxExpenses.toLocaleString()}.`
+    ? `Trend data from ${firstMonth} through ${lastMonth}.` +
+      (showIncome ? ` Peak income $${maxIncome.toLocaleString()}.` : "") +
+      (showExpenses ? ` Peak expenses $${maxExpenses.toLocaleString()}.` : "")
     : "No trend data available.";
 
   return (
@@ -67,41 +82,62 @@ export function TrendChart({ data, title = "Income vs Expenses Trend" }: TrendCh
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
             <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
+            {showExpenses && (
+              <YAxis
+                yAxisId="expenses"
+                tick={{ fontSize: 12 }}
+                orientation="left"
+                width={48}
+              />
+            )}
+            {showIncome && (
+              <YAxis
+                yAxisId="income"
+                tick={{ fontSize: 12 }}
+                orientation="right"
+                width={48}
+              />
+            )}
             <Tooltip content={<CustomTooltip />} />
             <Legend />
-            <Line
-              type="monotone"
-              dataKey="income"
-              stroke="hsl(var(--chart-5))"
-              strokeWidth={2}
-              name="Income"
-              dot={{ r: 4 }}
-            />
-            <Line
-              type="monotone"
-              dataKey="expenses"
-              stroke="hsl(var(--chart-4))"
-              strokeWidth={2}
-              name="Expenses"
-              dot={{ r: 4 }}
-            />
+            {showIncome && (
+              <Line
+                type="monotone"
+                dataKey="income"
+                yAxisId="income"
+                stroke="hsl(var(--chart-5))"
+                strokeWidth={2}
+                name="Income"
+                dot={{ r: 4 }}
+              />
+            )}
+            {showExpenses && (
+              <Line
+                type="monotone"
+                dataKey="expenses"
+                yAxisId="expenses"
+                stroke="hsl(var(--chart-4))"
+                strokeWidth={2}
+                name="Expenses"
+                dot={{ r: 4 }}
+              />
+            )}
           </LineChart>
         </ResponsiveContainer>
         <table className="sr-only" aria-label={`${title} data`}>
           <thead>
             <tr>
               <th scope="col">Month</th>
-              <th scope="col">Income (USD)</th>
-              <th scope="col">Expenses (USD)</th>
+              {showIncome && <th scope="col">Income (USD)</th>}
+              {showExpenses && <th scope="col">Expenses (USD)</th>}
             </tr>
           </thead>
           <tbody>
             {data.map((entry) => (
               <tr key={entry.month}>
                 <td>{entry.month}</td>
-                <td>${entry.income.toLocaleString()}</td>
-                <td>${entry.expenses.toLocaleString()}</td>
+                {showIncome && <td>${entry.income.toLocaleString()}</td>}
+                {showExpenses && <td>${entry.expenses.toLocaleString()}</td>}
               </tr>
             ))}
           </tbody>

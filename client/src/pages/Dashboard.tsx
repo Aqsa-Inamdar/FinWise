@@ -1,4 +1,7 @@
 import { DollarSign, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { StatCard } from "@/components/StatCard";
 import { ExpenseChart } from "@/components/ExpenseChart";
 import { TrendChart } from "@/components/TrendChart";
@@ -8,6 +11,7 @@ import { useFirestoreTransactions } from "@/hooks/useFirestoreTransactions";
 
 export default function Dashboard() {
   const { transactions, loading, error } = useFirestoreTransactions();
+  const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   // Calculate totals
   const totalIncome = transactions
@@ -42,12 +46,88 @@ export default function Dashboard() {
     color: chartColors[index % chartColors.length],
   }));
 
-  // Mock trend data (can be replaced later)
-  const trendData = [
-    { month: "Jan", income: totalIncome * 0.9, expenses: totalExpenses * 0.85 },
-    { month: "Feb", income: totalIncome * 0.95, expenses: totalExpenses * 0.9 },
-    { month: "Mar", income: totalIncome, expenses: totalExpenses },
-  ];
+  const allDates = transactions
+    .map((txn) => new Date(txn.date))
+    .filter((date) => !Number.isNaN(date.getTime()));
+  const latestDate = allDates.length ? new Date(Math.max(...allDates.map((d) => d.getTime()))) : new Date();
+  const defaultEndYear = latestDate.getUTCFullYear();
+  const defaultEndMonth = latestDate.getUTCMonth();
+  const defaultStartDate = new Date(Date.UTC(defaultEndYear, defaultEndMonth - 11, 1));
+  const [startYear, setStartYear] = useState(defaultStartDate.getUTCFullYear());
+  const [startMonth, setStartMonth] = useState(defaultStartDate.getUTCMonth());
+  const [endYear, setEndYear] = useState(defaultEndYear);
+  const [endMonth, setEndMonth] = useState(defaultEndMonth);
+  const [showIncome, setShowIncome] = useState(true);
+  const [showExpenses, setShowExpenses] = useState(true);
+
+  const monthKey = (year: number, monthIndex: number) =>
+    `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+
+  const yearOptions = useMemo(() => {
+    const years = new Set<number>();
+    allDates.forEach((date) => years.add(date.getUTCFullYear()));
+    years.add(new Date().getUTCFullYear());
+    return Array.from(years).sort((a, b) => a - b);
+  }, [transactions]);
+
+  const monthlyTotals = useMemo(() => {
+    const map = new Map<string, { income: number; expenses: number }>();
+    transactions.forEach((txn) => {
+      const date = new Date(txn.date);
+      if (Number.isNaN(date.getTime())) return;
+      const key = monthKey(date.getUTCFullYear(), date.getUTCMonth());
+      const entry = map.get(key) ?? { income: 0, expenses: 0 };
+      const amount = Number(txn.amount);
+      if (txn.type === "income") entry.income += amount;
+      if (txn.type === "expense") entry.expenses += amount;
+      map.set(key, entry);
+    });
+    return map;
+  }, [transactions]);
+
+  const normalizeRange = (newStartYear: number, newStartMonth: number, newEndYear: number, newEndMonth: number) => {
+    const start = new Date(Date.UTC(newStartYear, newStartMonth, 1));
+    const end = new Date(Date.UTC(newEndYear, newEndMonth, 1));
+    if (start > end) {
+      return { startYear: newStartYear, startMonth: newStartMonth, endYear: newStartYear, endMonth: newStartMonth };
+    }
+    return { startYear: newStartYear, startMonth: newStartMonth, endYear: newEndYear, endMonth: newEndMonth };
+  };
+
+  const trendData = useMemo(() => {
+    const normalized = normalizeRange(startYear, startMonth, endYear, endMonth);
+    const start = new Date(Date.UTC(normalized.startYear, normalized.startMonth, 1));
+    const end = new Date(Date.UTC(normalized.endYear, normalized.endMonth, 1));
+    const points: Array<{ month: string; income: number; expenses: number }> = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      const key = monthKey(cursor.getUTCFullYear(), cursor.getUTCMonth());
+      const entry = monthlyTotals.get(key) ?? { income: 0, expenses: 0 };
+      points.push({
+        month: `${monthLabels[cursor.getUTCMonth()]} ${String(cursor.getUTCFullYear()).slice(2)}`,
+        income: entry.income,
+        expenses: entry.expenses,
+      });
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+    return points;
+  }, [startYear, startMonth, endYear, endMonth, monthlyTotals]);
+
+  const handleStartChange = (nextYear: number, nextMonth: number) => {
+    const normalized = normalizeRange(nextYear, nextMonth, endYear, endMonth);
+    setStartYear(normalized.startYear);
+    setStartMonth(normalized.startMonth);
+    setEndYear(normalized.endYear);
+    setEndMonth(normalized.endMonth);
+  };
+
+  const handleEndChange = (nextYear: number, nextMonth: number) => {
+    const normalized = normalizeRange(startYear, startMonth, nextYear, nextMonth);
+    setStartYear(normalized.startYear);
+    setStartMonth(normalized.startMonth);
+    setEndYear(normalized.endYear);
+    setEndMonth(normalized.endMonth);
+  };
 
   // Accessible loading state
   if (loading) {
@@ -177,7 +257,103 @@ export default function Dashboard() {
               This chart shows changes in income and expenses over the past several months.
             </p>
 
-            <TrendChart data={trendData} aria-hidden="true" />
+            <div className="mb-4 flex flex-wrap items-end gap-4">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">From</p>
+                <div className="flex gap-2">
+                  <Select
+                    value={String(startMonth)}
+                    onValueChange={(value) => handleStartChange(startYear, Number(value))}
+                  >
+                    <SelectTrigger className="w-28">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {monthLabels.map((label, index) => (
+                        <SelectItem key={`start-month-${label}`} value={String(index)}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={String(startYear)}
+                    onValueChange={(value) => handleStartChange(Number(value), startMonth)}
+                  >
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {yearOptions.map((year) => (
+                        <SelectItem key={`start-year-${year}`} value={String(year)}>
+                          {year}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-sm font-medium">To</p>
+                <div className="flex gap-2">
+                  <Select
+                    value={String(endMonth)}
+                    onValueChange={(value) => handleEndChange(endYear, Number(value))}
+                  >
+                    <SelectTrigger className="w-28">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {monthLabels.map((label, index) => (
+                        <SelectItem key={`end-month-${label}`} value={String(index)}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={String(endYear)}
+                    onValueChange={(value) => handleEndChange(Number(value), endMonth)}
+                  >
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {yearOptions.map((year) => (
+                        <SelectItem key={`end-year-${year}`} value={String(year)}>
+                          {year}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={showIncome}
+                    onCheckedChange={(value) => setShowIncome(Boolean(value))}
+                  />
+                  Income
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={showExpenses}
+                    onCheckedChange={(value) => setShowExpenses(Boolean(value))}
+                  />
+                  Expenses
+                </label>
+              </div>
+            </div>
+
+            <TrendChart
+              data={trendData}
+              showIncome={showIncome}
+              showExpenses={showExpenses}
+              aria-hidden="true"
+            />
           </div>
         </div>
       ) : (
