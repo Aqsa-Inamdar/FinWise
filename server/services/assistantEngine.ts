@@ -1,5 +1,6 @@
 import { firestore } from "../firebaseAdmin";
 import { buildGoalProjection, fetchGoals, fetchUserNetSavings, type GoalDoc } from "./goalProjection";
+import OpenAI from "openai";
 
 export type AssistantIntent = "descriptive" | "predictive";
 export type ConfidenceLabel = "low" | "medium" | "high";
@@ -18,6 +19,8 @@ export type AssistantResponse = {
   evidence: Array<{ label: string; value: string }>;
   suggestions: string[];
 };
+
+type AssistantNarration = Pick<AssistantResponse, "answerSummary" | "sections" | "suggestions">;
 
 export type TxnRecord = {
   date: string;
@@ -157,6 +160,83 @@ const toConfidenceLabel = (probability: number): ConfidenceLabel => {
   if (probability >= 0.75) return "high";
   if (probability >= 0.55) return "medium";
   return "low";
+};
+
+const openaiClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+
+const narrationSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    answerSummary: { type: "string" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          points: { type: "array", items: { type: "string" } },
+        },
+        required: ["title", "points"],
+      },
+    },
+    suggestions: { type: "array", items: { type: "string" } },
+  },
+  required: ["answerSummary", "sections", "suggestions"],
+} as const;
+
+const narrateWithLlm = async (
+  base: AssistantResponse,
+  question: string,
+): Promise<AssistantNarration | null> => {
+  if (!openaiClient) return null;
+  try {
+    const response = await openaiClient.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a financial explainer. Rewrite the provided deterministic result into plain language. " +
+            "Do not invent numbers, assumptions, or metrics. Use only values present in the input JSON.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            question,
+            deterministic_result: base,
+            style: "plain-language rich report",
+          }),
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "assistant_narration",
+          schema: narrationSchema,
+          strict: true,
+        },
+      },
+      max_output_tokens: 700,
+    });
+
+    const raw = response.output_text?.trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AssistantNarration;
+    if (
+      typeof parsed.answerSummary !== "string" ||
+      !Array.isArray(parsed.sections) ||
+      !Array.isArray(parsed.suggestions)
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 };
 
 const parseHorizonMonths = (question: string): number => {
@@ -539,7 +619,7 @@ export const answerAssistantQuestion = async (params: {
   const txns = await fetchTransactionsInRange(userId, startDate, endDate);
 
   if (!txns.length) {
-    return {
+    const baseNoData = {
       intent: intent.intent,
       subIntent: intent.subIntent,
       confidence: "low" as ConfidenceLabel,
@@ -561,12 +641,31 @@ export const answerAssistantQuestion = async (params: {
         "Add or import transactions.",
       ],
     } satisfies AssistantResponse;
+    const narrated = await narrateWithLlm(baseNoData, question);
+    if (!narrated) return baseNoData;
+    return {
+      ...baseNoData,
+      answerSummary: narrated.answerSummary,
+      sections: narrated.sections,
+      suggestions: narrated.suggestions.slice(0, 5),
+    };
   }
 
-  if (intent.intent === "predictive") {
-    return buildPredictiveResponse(userId, question, txns, selectedGoalId ?? null, intent.subIntent);
+  const baseResponse =
+    intent.intent === "predictive"
+      ? await buildPredictiveResponse(userId, question, txns, selectedGoalId ?? null, intent.subIntent)
+      : buildDescriptiveResponse(question, txns, intent.subIntent);
+
+  const narrated = await narrateWithLlm(baseResponse, question);
+  if (!narrated) {
+    return baseResponse;
   }
-  return buildDescriptiveResponse(question, txns, intent.subIntent);
+  return {
+    ...baseResponse,
+    answerSummary: narrated.answerSummary,
+    sections: narrated.sections,
+    suggestions: narrated.suggestions.slice(0, 5),
+  };
 };
 
 export const buildQuickIntents = async (params: {
