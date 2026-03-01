@@ -166,7 +166,7 @@ export default function Goals() {
         <AddGoalDialog />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid auto-rows-min items-start gap-4 md:grid-cols-2">
         {isLoading && <p className="text-sm text-muted-foreground">Loading goals...</p>}
         {error && (
           <p className="text-sm text-red-600">Unable to load goals. Please refresh and try again.</p>

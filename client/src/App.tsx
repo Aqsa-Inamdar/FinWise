@@ -136,6 +136,7 @@ function AuthenticatedLayout() {
   const location = useLocation();
   const mainRef = useRef<HTMLElement | null>(null);
   const srHeaderRef = useRef<HTMLHeadingElement | null>(null);
+  const isAssistantPage = location.pathname === "/assistant";
 
   const accessibleTitle =
     PAGE_TITLES[location.pathname] ?? "Page Not Found";
@@ -182,7 +183,7 @@ function AuthenticatedLayout() {
             id="main-content"
             role="main"
             ref={mainRef}
-            className="flex-1 overflow-auto p-6 outline-none"
+            className={`flex-1 p-6 outline-none ${isAssistantPage ? "overflow-hidden" : "overflow-auto"}`}
             tabIndex={-1}
             aria-live="polite"
           >

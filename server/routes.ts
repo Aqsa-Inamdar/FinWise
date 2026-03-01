@@ -20,6 +20,15 @@ import {
   upsertGoal,
   type GoalDoc,
 } from "./services/goalProjection";
+import {
+  answerAssistantQuestion,
+  appendAssistantMessage,
+  buildQuickIntents,
+  createAssistantThread,
+  getAssistantThreadMessages,
+  hardDeleteAssistantThread,
+  listAssistantThreads,
+} from "./services/assistantEngine";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const getUserId = (req: Request): string => {
@@ -492,6 +501,115 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(profile);
     } catch (error: any) {
       return res.status(500).json({ error: error?.message ?? "Failed to build behavioral profile." });
+    }
+  });
+
+  const assistantQuerySchema = z.object({
+    question: z.string().min(1),
+    startDate: z.string().min(1),
+    endDate: z.string().min(1),
+    selectedGoalId: z.string().optional().nullable(),
+    chatId: z.string().optional().nullable(),
+  });
+
+  app.get("/api/assistant/chats", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const chats = await listAssistantThreads(userId);
+      return res.json({ chats });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to load chats." });
+    }
+  });
+
+  app.post("/api/assistant/chats", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const title = typeof req.body?.title === "string" && req.body.title.trim()
+        ? req.body.title.trim()
+        : "New Chat";
+      const chatId = await createAssistantThread(userId, title);
+      return res.json({ chatId });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to create chat." });
+    }
+  });
+
+  app.get("/api/assistant/chats/:id/messages", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const messages = await getAssistantThreadMessages(userId, req.params.id);
+      return res.json({ messages });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to load messages." });
+    }
+  });
+
+  app.delete("/api/assistant/chats/:id", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      await hardDeleteAssistantThread(userId, req.params.id);
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to delete chat." });
+    }
+  });
+
+  app.get("/api/assistant/quick-intents", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const startDate = typeof req.query.startDate === "string" ? req.query.startDate : "";
+      const endDate = typeof req.query.endDate === "string" ? req.query.endDate : "";
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate and endDate are required." });
+      }
+      const intents = await buildQuickIntents({ userId, startDate, endDate });
+      return res.json({ intents });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to load quick intents." });
+    }
+  });
+
+  app.post("/api/assistant/query", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = assistantQuerySchema.parse(req.body);
+      let chatId = parsed.chatId ?? null;
+      if (!chatId) {
+        chatId = await createAssistantThread(userId, parsed.question.slice(0, 80));
+      }
+
+      await appendAssistantMessage({
+        userId,
+        chatId,
+        role: "user",
+        text: parsed.question,
+        payload: {
+          startDate: parsed.startDate,
+          endDate: parsed.endDate,
+          selectedGoalId: parsed.selectedGoalId ?? null,
+        },
+      });
+
+      const response = await answerAssistantQuestion({
+        userId,
+        question: parsed.question,
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        selectedGoalId: parsed.selectedGoalId ?? null,
+      });
+
+      await appendAssistantMessage({
+        userId,
+        chatId,
+        role: "assistant",
+        text: response.answerSummary,
+        payload: response as unknown as Record<string, unknown>,
+      });
+
+      return res.json({ chatId, response });
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message ?? "Assistant query failed." });
     }
   });
 

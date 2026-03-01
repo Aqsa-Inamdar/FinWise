@@ -36,6 +36,7 @@ export function GoalCard({
   onDelete,
   testId,
 }: GoalCardProps) {
+  const isCompleted = status === "completed";
   const safeTarget = Math.max(0, target);
   const allocated = Math.min(Math.max(0, current), safeTarget);
   const percentage = safeTarget > 0 ? Math.min((allocated / safeTarget) * 100, 100) : 0;
@@ -105,22 +106,27 @@ export function GoalCard({
         <p className="text-xs text-muted-foreground" data-testid={`${testId}-remaining`}>
           Remaining to complete: ${remaining.toLocaleString()}
         </p>
-        {typeof probabilityAchievableByDeadline === "number" && (
+        {isCompleted && (
+          <p className="text-xs text-emerald-700" data-testid={`${testId}-completed-note`}>
+            Goal achieved. No further prediction is needed.
+          </p>
+        )}
+        {!isCompleted && typeof probabilityAchievableByDeadline === "number" && (
           <p className="text-xs text-muted-foreground" data-testid={`${testId}-probability`}>
             Achievability probability: {(probabilityAchievableByDeadline * 100).toFixed(1)}%
           </p>
         )}
-        {projectedCompletionDate && (
+        {!isCompleted && projectedCompletionDate && (
           <p className="text-xs text-muted-foreground" data-testid={`${testId}-projected-completion`}>
             Projected completion: {projectedCompletionDate}
           </p>
         )}
-        {statusMessage && (
+        {!isCompleted && statusMessage && (
           <p className="text-xs text-muted-foreground" data-testid={`${testId}-status-message`}>
             {statusMessage}
           </p>
         )}
-        {explainability && explainability.length > 0 && (
+        {!isCompleted && explainability && explainability.length > 0 && (
           <div className="space-y-1 border-t pt-2">
             {explainability.slice(0, 2).map((item, index) => (
               <p
