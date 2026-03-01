@@ -11,7 +11,7 @@ interface GoalCardProps {
   savingsLeftAfterGoal?: number | null;
   target: number;
   deadline: string;
-  status: "on-track" | "approaching" | "behind";
+  status: "completed" | "on-track" | "approaching" | "difficult";
   probabilityAchievableByDeadline?: number | null;
   projectedCompletionDate?: string | null;
   statusMessage?: string | null;
@@ -46,9 +46,10 @@ export function GoalCard({
   const progressId = useId();
 
   const statusConfig = {
+    completed: { label: "Completed", className: "bg-emerald-600" },
     "on-track": { label: "On Track", className: "bg-green-500" },
     approaching: { label: "Approaching Deadline", className: "bg-amber-500" },
-    behind: { label: "Behind Schedule", className: "bg-red-500" },
+    difficult: { label: "Difficult", className: "bg-red-600" },
   };
 
   return (

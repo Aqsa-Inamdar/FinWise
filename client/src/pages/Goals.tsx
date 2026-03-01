@@ -40,12 +40,28 @@ type GoalResponse = {
   projection?: GoalProjectionResponse;
 };
 
-const mapStatus = (
-  status?: GoalProjectionResponse["status"],
-): "on-track" | "approaching" | "behind" => {
+const NEAR_DEADLINE_DAYS = 45;
+
+const resolveGoalStatus = (goal: GoalResponse, allocatedAmount: number): "completed" | "on-track" | "approaching" | "difficult" => {
+  const target = Math.max(0, Number(goal.targetAmount) || 0);
+  if (allocatedAmount >= target && target > 0) return "completed";
+
+  const achievable = goal.projection?.contract?.achievableByDeadline;
+  if (achievable === true) return "on-track";
+  if (achievable === false) return "difficult";
+
+  const deadlineTs = new Date(goal.deadline).getTime();
+  if (Number.isFinite(deadlineTs)) {
+    const daysLeft = Math.ceil((deadlineTs - Date.now()) / (1000 * 60 * 60 * 24));
+    if (daysLeft >= 0 && daysLeft <= NEAR_DEADLINE_DAYS) {
+      return "approaching";
+    }
+  }
+
+  const status = goal.projection?.status;
   if (status === "on_track") return "on-track";
   if (status === "at_risk") return "approaching";
-  return "behind";
+  return "difficult";
 };
 
 export default function Goals() {
@@ -170,7 +186,7 @@ export default function Goals() {
               savingsLeftAfterGoal={goal.savingsLeftAfterGoal}
               target={goal.targetAmount}
               deadline={new Date(goal.deadline).toLocaleDateString()}
-              status={mapStatus(goal.projection?.status)}
+              status={resolveGoalStatus(goal, goal.allocatedAmount)}
               probabilityAchievableByDeadline={
                 goal.projection?.contract?.probabilityAchievableByDeadline ?? null
               }
