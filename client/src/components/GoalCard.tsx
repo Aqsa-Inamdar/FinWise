@@ -107,7 +107,7 @@ export function GoalCard({
           Remaining to complete: ${remaining.toLocaleString()}
         </p>
         {isCompleted && (
-          <p className="text-xs text-emerald-700" data-testid={`${testId}-completed-note`}>
+          <p className="text-xs text-emerald-700 dark:text-emerald-400" data-testid={`${testId}-completed-note`}>
             Goal achieved. No further prediction is needed.
           </p>
         )}

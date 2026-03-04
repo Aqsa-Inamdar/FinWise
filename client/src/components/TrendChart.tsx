@@ -22,6 +22,7 @@ interface TrendChartProps {
   title?: string;
   showIncome?: boolean;
   showExpenses?: boolean;
+  expensesLabel?: string;
 }
 
 export function TrendChart({
@@ -29,6 +30,7 @@ export function TrendChart({
   title = "Income vs Expenses Trend",
   showIncome = true,
   showExpenses = true,
+  expensesLabel = "Expenses",
 }: TrendChartProps) {
   const headingId = useId();
   const descriptionId = useId();
@@ -61,7 +63,7 @@ export function TrendChart({
   const chartSummary = data.length
     ? `Trend data from ${firstMonth} through ${lastMonth}.` +
       (showIncome ? ` Peak income $${maxIncome.toLocaleString()}.` : "") +
-      (showExpenses ? ` Peak expenses $${maxExpenses.toLocaleString()}.` : "")
+      (showExpenses ? ` Peak ${expensesLabel.toLowerCase()} $${maxExpenses.toLocaleString()}.` : "")
     : "No trend data available.";
 
   return (
@@ -82,30 +84,20 @@ export function TrendChart({
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
             <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-            {showExpenses && (
-              <YAxis
-                yAxisId="expenses"
-                tick={{ fontSize: 12 }}
-                orientation="left"
-                width={48}
-              />
-            )}
-            {showIncome && (
-              <YAxis
-                yAxisId="income"
-                tick={{ fontSize: 12 }}
-                orientation="right"
-                width={48}
-              />
-            )}
+            <YAxis
+              yAxisId="amount"
+              tick={{ fontSize: 12 }}
+              orientation="left"
+              width={56}
+            />
             <Tooltip content={<CustomTooltip />} />
             <Legend />
             {showIncome && (
               <Line
                 type="monotone"
                 dataKey="income"
-                yAxisId="income"
-                stroke="hsl(var(--chart-5))"
+                yAxisId="amount"
+                stroke="hsl(var(--primary))"
                 strokeWidth={2}
                 name="Income"
                 dot={{ r: 4 }}
@@ -115,21 +107,24 @@ export function TrendChart({
               <Line
                 type="monotone"
                 dataKey="expenses"
-                yAxisId="expenses"
-                stroke="hsl(var(--chart-4))"
+                yAxisId="amount"
+                stroke="hsl(var(--destructive))"
                 strokeWidth={2}
-                name="Expenses"
+                name={expensesLabel}
                 dot={{ r: 4 }}
               />
             )}
           </LineChart>
         </ResponsiveContainer>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Both lines use the same USD scale for direct comparison.
+        </p>
         <table className="sr-only" aria-label={`${title} data`}>
           <thead>
             <tr>
               <th scope="col">Month</th>
               {showIncome && <th scope="col">Income (USD)</th>}
-              {showExpenses && <th scope="col">Expenses (USD)</th>}
+              {showExpenses && <th scope="col">{expensesLabel} (USD)</th>}
             </tr>
           </thead>
           <tbody>

@@ -315,7 +315,7 @@ export default function Transactions() {
                   )}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="start" className="p-0">
+              <PopoverContent align="start" className="w-auto p-0">
                 <Calendar
                   mode="range"
                   numberOfMonths={2}

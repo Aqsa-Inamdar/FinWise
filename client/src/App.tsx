@@ -109,6 +109,7 @@ import Goals from "@/pages/Goals";
 import Transactions from "@/pages/Transactions";
 import Insights from "@/pages/Insights";
 import Assistant from "@/pages/Assistant";
+import Account from "@/pages/Account";
 import NotFound from "@/pages/not-found";
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 
@@ -121,6 +122,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/transactions": "Transactions",
   "/insights": "Financial Insights",
   "/assistant": "AI Assistant",
+  "/account": "My Account",
   "/login": "Login to FinWise",
 };
 
@@ -193,6 +195,7 @@ function AuthenticatedLayout() {
               <Route path="/transactions" element={<Transactions />} />
               <Route path="/insights" element={<Insights />} />
               <Route path="/assistant" element={<Assistant />} />
+              <Route path="/account" element={<Account />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </main>

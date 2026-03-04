@@ -261,6 +261,40 @@ export const fetchUserNetSavings = async (userId: string): Promise<number> => {
   return income - expense;
 };
 
+export type AllocatedGoal = GoalDoc & { savingsLeftAfterGoal: number };
+
+export const allocateGoalsByDeadline = (goals: GoalDoc[], totalSavings: number): AllocatedGoal[] => {
+  const availablePool = Math.max(0, totalSavings);
+  let remainingPool = availablePool;
+
+  const sorted = [...goals].sort((a, b) => {
+    const aTime = new Date(a.deadline).getTime();
+    const bTime = new Date(b.deadline).getTime();
+    const aValid = Number.isFinite(aTime);
+    const bValid = Number.isFinite(bTime);
+    if (aValid && bValid) return aTime - bTime;
+    if (aValid) return -1;
+    if (bValid) return 1;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+
+  return sorted.map((goal) => {
+    const target = Number(goal.targetAmount) || 0;
+    const hasOverride = goal.allocationOverride != null;
+    const overrideRaw = hasOverride ? Number(goal.allocationOverride) : 0;
+    const validOverride = hasOverride && Number.isFinite(overrideRaw) && overrideRaw >= 0;
+    const requested = validOverride ? Math.min(target, overrideRaw) : target;
+    const allocated = Math.min(Math.max(0, requested), Math.max(0, remainingPool));
+    remainingPool -= allocated;
+
+    return {
+      ...goal,
+      currentAmount: allocated,
+      savingsLeftAfterGoal: Math.max(0, remainingPool),
+    };
+  });
+};
+
 export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = new Date()): Promise<GoalProjection> => {
   const history = await fetchMonthlySummaries(userId, 6, now);
   const features = buildFeaturesFromHistory(history);

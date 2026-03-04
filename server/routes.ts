@@ -10,9 +10,11 @@ import { runSpendingVariabilityInsight } from "./services/spendingVariability";
 import { insightSnapshotSchema } from "@shared/schema";
 import { firestore } from "./firebaseAdmin";
 import { getAuth } from "firebase-admin/auth";
+import type { CollectionReference } from "firebase-admin/firestore";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import {
+  allocateGoalsByDeadline,
   buildGoalProjection,
   deleteGoal,
   fetchGoals,
@@ -23,16 +25,54 @@ import {
 import {
   answerAssistantQuestion,
   appendAssistantMessage,
-  buildQuickIntents,
+  buildQuickIntentsCached,
   createAssistantThread,
+  exportAssistantThread,
+  getAssistantHealth,
   getAssistantThreadMessages,
   hardDeleteAssistantThread,
   listAssistantThreads,
+  renameAssistantThread,
 } from "./services/assistantEngine";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const getUserId = (req: Request): string => {
     return (req as unknown as Request & { userId: string }).userId;
+  };
+
+  const sanitizeQuestionForLogs = (question: string) =>
+    question
+      .replace(/\b\d{12,19}\b/g, "[redacted-card]")
+      .replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[redacted-ssn]")
+      .slice(0, 200);
+
+  const writeAuditLog = async (
+    userId: string,
+    action: string,
+    targetId: string,
+    metadata?: Record<string, unknown>,
+  ) => {
+    await firestore
+      .collection("users")
+      .doc(userId)
+      .collection("audit_logs")
+      .add({
+        action,
+        targetId,
+        createdAt: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
+      });
+  };
+
+  const deleteCollectionDocuments = async (collectionRef: CollectionReference, batchSize = 250) => {
+    while (true) {
+      const snapshot = await collectionRef.limit(batchSize).get();
+      if (snapshot.empty) break;
+      const batch = firestore.batch();
+      snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+      if (snapshot.size < batchSize) break;
+    }
   };
 
   const authenticateRequest = async (req: Request, res: Response, next: NextFunction) => {
@@ -88,6 +128,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.use("/api", authenticateRequest);
 
+  const accountPatchSchema = z
+    .object({
+      name: z.string().trim().min(1).max(80).optional(),
+      email: z.string().trim().email().optional(),
+    })
+    .refine((value) => Boolean(value.name || value.email), {
+      message: "At least one of name or email must be provided.",
+    });
+
+  app.get("/api/account", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const authUser = await getAuth().getUser(userId);
+      const userDoc = await firestore.collection("users").doc(userId).get();
+      const profile = userDoc.exists ? userDoc.data() : {};
+      return res.json({
+        id: userId,
+        name: profile?.name ?? authUser.displayName ?? "",
+        email: profile?.email ?? authUser.email ?? "",
+        provider: profile?.provider ?? null,
+        createdAt: profile?.createdAt ?? null,
+        updatedAt: profile?.updatedAt ?? null,
+      });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to load account." });
+    }
+  });
+
+  app.patch("/api/account", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = accountPatchSchema.parse(req.body);
+
+      const authUpdates: { displayName?: string; email?: string } = {};
+      if (parsed.name) authUpdates.displayName = parsed.name;
+      if (parsed.email) authUpdates.email = parsed.email;
+      if (Object.keys(authUpdates).length) {
+        await getAuth().updateUser(userId, authUpdates);
+      }
+
+      await firestore
+        .collection("users")
+        .doc(userId)
+        .set(
+          {
+            ...(parsed.name ? { name: parsed.name } : {}),
+            ...(parsed.email ? { email: parsed.email } : {}),
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+
+      await writeAuditLog(userId, "account_update", userId, {
+        updatedName: Boolean(parsed.name),
+        updatedEmail: Boolean(parsed.email),
+      });
+
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message ?? "Failed to update account." });
+    }
+  });
+
+  app.delete("/api/account", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const userRef = firestore.collection("users").doc(userId);
+
+      const assistantChats = await userRef.collection("assistant_chats").get();
+      for (const chatDoc of assistantChats.docs) {
+        await deleteCollectionDocuments(chatDoc.ref.collection("messages"));
+      }
+      await deleteCollectionDocuments(userRef.collection("assistant_chats"));
+      await deleteCollectionDocuments(userRef.collection("goals"));
+      await deleteCollectionDocuments(userRef.collection("insights"));
+      await deleteCollectionDocuments(userRef.collection("transactions"));
+      await deleteCollectionDocuments(userRef.collection("audit_logs"));
+
+      await userRef.delete();
+      await getAuth().deleteUser(userId);
+
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to delete account." });
+    }
+  });
+
   // Expense routes
   app.post("/api/expenses", async (req, res) => {
     try {
@@ -120,6 +247,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userName: userName ?? null,
           userEmail: userEmail ?? null,
         });
+      await writeAuditLog(userId, "expense_create", expense.id, {
+        amount: Number(expense.amount),
+        category: expense.category,
+      });
       res.json(expense);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -142,8 +273,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/expenses/:id", async (req, res) => {
     try {
+      const userId = getUserId(req);
       const success = await storage.deleteExpense(req.params.id);
       if (success) {
+        await writeAuditLog(userId, "expense_delete", req.params.id);
         res.json({ success: true });
       } else {
         res.status(404).json({ error: "Expense not found" });
@@ -185,6 +318,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userName: userName ?? null,
           userEmail: userEmail ?? null,
         });
+      await writeAuditLog(userId, "income_create", income.id, {
+        amount: Number(income.amount),
+        source: income.source,
+      });
       res.json(income);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -203,8 +340,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/income/:id", async (req, res) => {
     try {
+      const userId = getUserId(req);
       const success = await storage.deleteIncome(req.params.id);
       if (success) {
+        await writeAuditLog(userId, "income_delete", req.params.id);
         res.json({ success: true });
       } else {
         res.status(404).json({ error: "Income not found" });
@@ -239,40 +378,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const goalUpdateSchema = goalInputSchema.partial();
 
-  type AllocatedGoal = GoalDoc & { savingsLeftAfterGoal: number };
-
-  const allocateSavingsByDeadline = (goals: GoalDoc[], totalSavings: number): AllocatedGoal[] => {
-    const availablePool = Math.max(0, totalSavings);
-    let remainingPool = availablePool;
-
-    // Allocate finite deadlines first, then goals without valid deadlines.
-    const sorted = [...goals].sort((a, b) => {
-      const aTime = new Date(a.deadline).getTime();
-      const bTime = new Date(b.deadline).getTime();
-      const aValid = Number.isFinite(aTime);
-      const bValid = Number.isFinite(bTime);
-      if (aValid && bValid) return aTime - bTime;
-      if (aValid) return -1;
-      if (bValid) return 1;
-      return a.createdAt.localeCompare(b.createdAt);
-    });
-
-    return sorted.map((goal) => {
-      const target = Number(goal.targetAmount) || 0;
-      const hasOverride = goal.allocationOverride != null;
-      const overrideRaw = hasOverride ? Number(goal.allocationOverride) : 0;
-      const validOverride = hasOverride && Number.isFinite(overrideRaw) && overrideRaw >= 0;
-      const requested = validOverride ? Math.min(target, overrideRaw) : target;
-      const allocated = Math.min(Math.max(0, requested), Math.max(0, remainingPool));
-      remainingPool -= allocated;
-      return {
-        ...goal,
-        currentAmount: allocated,
-        savingsLeftAfterGoal: Math.max(0, remainingPool),
-      };
-    });
-  };
-
   // Goal routes (Firestore)
   app.post("/api/goals", async (req, res) => {
     try {
@@ -292,6 +397,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updatedAt: nowIso,
       };
       await upsertGoal(userId, goal);
+      await writeAuditLog(userId, "goal_create", goal.id, {
+        name: goal.name,
+        targetAmount: goal.targetAmount,
+        deadline: goal.deadline,
+      });
       res.json(goal);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -303,7 +413,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { userId } = req as Request & { userId: string };
       const goals = await fetchGoals(userId);
       const computedCurrentAmount = await fetchUserNetSavings(userId);
-      const allocatedGoals = allocateSavingsByDeadline(goals, computedCurrentAmount);
+      const allocatedGoals = allocateGoalsByDeadline(goals, computedCurrentAmount);
       const enriched = await Promise.all(
         allocatedGoals.map(async (goalWithComputedSavings) => {
           return {
@@ -334,6 +444,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updatedAt: new Date().toISOString(),
       };
       await upsertGoal(userId, updated);
+      await writeAuditLog(userId, "goal_update", updated.id, {
+        name: updated.name,
+        targetAmount: updated.targetAmount,
+        deadline: updated.deadline,
+      });
       res.json(updated);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -344,6 +459,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       await deleteGoal(userId, req.params.id);
+      await writeAuditLog(userId, "goal_delete", req.params.id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -505,11 +621,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const assistantQuerySchema = z.object({
-    question: z.string().min(1),
+    question: z.string().min(1).max(500),
     startDate: z.string().min(1),
     endDate: z.string().min(1),
     selectedGoalId: z.string().optional().nullable(),
     chatId: z.string().optional().nullable(),
+  });
+
+  app.get("/api/assistant/health", async (_req, res) => {
+    return res.json(getAssistantHealth());
   });
 
   app.get("/api/assistant/chats", async (req, res) => {
@@ -529,6 +649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? req.body.title.trim()
         : "New Chat";
       const chatId = await createAssistantThread(userId, title);
+      await writeAuditLog(userId, "assistant_chat_create", chatId, { title });
       return res.json({ chatId });
     } catch (error: any) {
       return res.status(500).json({ error: error?.message ?? "Failed to create chat." });
@@ -538,10 +659,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/assistant/chats/:id/messages", async (req, res) => {
     try {
       const userId = getUserId(req);
-      const messages = await getAssistantThreadMessages(userId, req.params.id);
+      const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 100;
+      const limit = Number.isFinite(limitRaw) ? limitRaw : 100;
+      const messages = await getAssistantThreadMessages(userId, req.params.id, limit);
       return res.json({ messages });
     } catch (error: any) {
       return res.status(500).json({ error: error?.message ?? "Failed to load messages." });
+    }
+  });
+
+  app.patch("/api/assistant/chats/:id", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const title = typeof req.body?.title === "string" ? req.body.title : "";
+      if (!title.trim()) return res.status(400).json({ error: "title is required." });
+      await renameAssistantThread(userId, req.params.id, title);
+      await writeAuditLog(userId, "assistant_chat_rename", req.params.id);
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to rename chat." });
     }
   });
 
@@ -549,9 +685,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       await hardDeleteAssistantThread(userId, req.params.id);
+      await writeAuditLog(userId, "assistant_chat_delete", req.params.id);
       return res.json({ success: true });
     } catch (error: any) {
       return res.status(500).json({ error: error?.message ?? "Failed to delete chat." });
+    }
+  });
+
+  app.get("/api/assistant/chats/:id/export", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const payload = await exportAssistantThread(userId, req.params.id);
+      return res.json(payload);
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to export chat." });
     }
   });
 
@@ -563,7 +710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!startDate || !endDate) {
         return res.status(400).json({ error: "startDate and endDate are required." });
       }
-      const intents = await buildQuickIntents({ userId, startDate, endDate });
+      const intents = await buildQuickIntentsCached({ userId, startDate, endDate });
       return res.json({ intents });
     } catch (error: any) {
       return res.status(500).json({ error: error?.message ?? "Failed to load quick intents." });
@@ -578,6 +725,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!chatId) {
         chatId = await createAssistantThread(userId, parsed.question.slice(0, 80));
       }
+
+      const history = await getAssistantThreadMessages(userId, chatId, 8);
+      const chatHistory = history
+        .map((m) => ({
+          role: (m.role === "assistant" ? "assistant" : "user") as "assistant" | "user",
+          text: String(m.text ?? ""),
+        }))
+        .filter((m) => m.text.trim().length > 0);
 
       await appendAssistantMessage({
         userId,
@@ -597,6 +752,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startDate: parsed.startDate,
         endDate: parsed.endDate,
         selectedGoalId: parsed.selectedGoalId ?? null,
+        chatHistory,
       });
 
       await appendAssistantMessage({
@@ -605,6 +761,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         role: "assistant",
         text: response.answerSummary,
         payload: response as unknown as Record<string, unknown>,
+      });
+
+      await writeAuditLog(userId, "assistant_query", chatId, {
+        question: sanitizeQuestionForLogs(parsed.question),
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        selectedGoalId: parsed.selectedGoalId ?? null,
+        intent: response.intent,
+        subIntent: response.subIntent,
+        confidence: response.confidence,
       });
 
       return res.json({ chatId, response });

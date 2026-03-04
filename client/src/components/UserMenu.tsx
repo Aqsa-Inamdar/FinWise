@@ -1,4 +1,4 @@
-import { LogOut, User } from "lucide-react";
+import { LogOut, Settings, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,6 +21,10 @@ export function UserMenu() {
     navigate("/login");
   };
 
+  const handleMyAccount = () => {
+    navigate("/account");
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -35,6 +39,10 @@ export function UserMenu() {
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel>My Account</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleMyAccount} data-testid="button-my-account">
+          <Settings className="mr-2 h-4 w-4" />
+          <span>My Account</span>
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={handleLogout} data-testid="button-logout">
           <LogOut className="mr-2 h-4 w-4" />
           <span>Log out</span>

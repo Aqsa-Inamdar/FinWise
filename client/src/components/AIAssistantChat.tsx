@@ -13,7 +13,7 @@ type AssistantSection = {
 };
 
 type AssistantResponse = {
-  intent: "descriptive" | "predictive";
+  intent: "descriptive" | "predictive" | "prescriptive";
   subIntent: string;
   confidence: "low" | "medium" | "high";
   answerSummary: string;
@@ -84,6 +84,7 @@ export function AIAssistantChat() {
   });
   const [selectedGoalId, setSelectedGoalId] = useState<string>("");
   const [quickIntents, setQuickIntents] = useState<string[]>([]);
+  const [llmEnabled, setLlmEnabled] = useState<boolean | null>(null);
 
   const { data: goalsData } = useQuery<{ goals: GoalOption[] }>({ queryKey: ["/api/goals"] });
   const goalOptions = goalsData?.goals ?? [];
@@ -103,7 +104,8 @@ export function AIAssistantChat() {
 
   const loadMessages = async (chatId: string) => {
     const authHeader = await getAuthHeader();
-    const res = await fetch(`/api/assistant/chats/${chatId}/messages`, {
+    const params = new URLSearchParams({ limit: "100" });
+    const res = await fetch(`/api/assistant/chats/${chatId}/messages?${params.toString()}`, {
       headers: authHeader,
       credentials: "include",
     });
@@ -132,6 +134,11 @@ export function AIAssistantChat() {
     loadChats().catch(() => {
       toast({ title: "Assistant", description: "Unable to load chat history.", variant: "destructive" });
     });
+    getAuthHeader()
+      .then((authHeader) => fetch("/api/assistant/health", { headers: authHeader, credentials: "include" }))
+      .then(async (res) => (res.ok ? parseJsonSafely(res) : null))
+      .then((json) => setLlmEnabled(Boolean(json?.llmEnabled)))
+      .catch(() => setLlmEnabled(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -177,6 +184,44 @@ export function AIAssistantChat() {
       await loadChats();
     } catch {
       toast({ title: "Assistant", description: "Unable to delete chat.", variant: "destructive" });
+    }
+  };
+
+  const renameChat = async (chatId: string, currentTitle: string) => {
+    const nextTitle = window.prompt("Rename chat", currentTitle || "New Chat");
+    if (nextTitle == null) return;
+    if (!nextTitle.trim()) {
+      toast({ title: "Assistant", description: "Chat title cannot be empty.", variant: "destructive" });
+      return;
+    }
+    try {
+      await apiRequest("PATCH", `/api/assistant/chats/${chatId}`, { title: nextTitle.trim() });
+      await loadChats();
+    } catch {
+      toast({ title: "Assistant", description: "Unable to rename chat.", variant: "destructive" });
+    }
+  };
+
+  const exportChat = async (chatId: string, title: string) => {
+    try {
+      const authHeader = await getAuthHeader();
+      const res = await fetch(`/api/assistant/chats/${chatId}/export`, {
+        headers: authHeader,
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("export failed");
+      const payload = await parseJsonSafely(res);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(title || "assistant-chat").replace(/[^a-z0-9-_]+/gi, "_")}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Assistant", description: "Unable to export chat.", variant: "destructive" });
     }
   };
 
@@ -238,14 +283,6 @@ export function AIAssistantChat() {
           </div>
         )}
 
-        {payload.suggestions.length > 0 && (
-          <div className="space-y-1">
-            <p className="font-medium">Suggested next questions</p>
-            {payload.suggestions.slice(0, 3).map((item, idx) => (
-              <p key={`${item}-${idx}`} className="text-muted-foreground">- {item}</p>
-            ))}
-          </div>
-        )}
       </div>
     );
   };
@@ -254,6 +291,16 @@ export function AIAssistantChat() {
     () => chats.find((c) => c.id === activeChatId)?.title ?? "New Chat",
     [chats, activeChatId],
   );
+
+  const latestAssistantSuggestions = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg.role === "assistant" && msg.payload?.suggestions?.length) {
+        return msg.payload.suggestions.slice(0, 5);
+      }
+    }
+    return [] as string[];
+  }, [messages]);
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[280px_1fr]">
@@ -272,7 +319,21 @@ export function AIAssistantChat() {
                 {chat.title || "Untitled"}
               </button>
               <p className="text-xs text-muted-foreground line-clamp-2">{chat.lastMessagePreview || "No messages yet"}</p>
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => renameChat(chat.id, chat.title)}
+                >
+                  Rename
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => exportChat(chat.id, chat.title)}
+                >
+                  Export
+                </Button>
                 <Button
                   size="sm"
                   variant="destructive"
@@ -295,6 +356,11 @@ export function AIAssistantChat() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="font-medium">{activeChatTitle}</p>
             <div className="flex flex-wrap gap-2 items-center">
+              {llmEnabled != null && (
+                <span className="text-xs text-muted-foreground">
+                  Narration: {llmEnabled ? "LLM enabled" : "rules only"}
+                </span>
+              )}
               <label className="text-xs text-muted-foreground">Start</label>
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[160px]" />
               <label className="text-xs text-muted-foreground">End</label>
@@ -302,7 +368,7 @@ export function AIAssistantChat() {
               <select
                 value={selectedGoalId}
                 onChange={(e) => setSelectedGoalId(e.target.value)}
-                className="h-9 rounded-md border px-2 text-sm"
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">No goal selected</option>
                 {goalOptions.map((g) => (
@@ -312,15 +378,6 @@ export function AIAssistantChat() {
             </div>
           </div>
 
-          {quickIntents.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {quickIntents.map((intent, idx) => (
-                <Button key={`${intent}-${idx}`} variant="outline" size="sm" onClick={() => askQuestion(intent)}>
-                  {intent}
-                </Button>
-              ))}
-            </div>
-          )}
         </div>
 
         <section className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4" role="log" aria-live="polite">
@@ -348,6 +405,23 @@ export function AIAssistantChat() {
             askQuestion(question);
           }}
         >
+          {(latestAssistantSuggestions.length > 0 || quickIntents.length > 0) && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {(latestAssistantSuggestions.length > 0 ? latestAssistantSuggestions : quickIntents)
+                .slice(0, 5)
+                .map((suggestion, idx) => (
+                <Button
+                  key={`${suggestion}-${idx}`}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => askQuestion(suggestion)}
+                >
+                  {suggestion}
+                </Button>
+              ))}
+            </div>
+          )}
           <div className="flex gap-2">
             <Input
               value={question}

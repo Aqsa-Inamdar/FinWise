@@ -1,8 +1,13 @@
 import { firestore } from "../firebaseAdmin";
-import { buildGoalProjection, fetchGoals, fetchUserNetSavings, type GoalDoc } from "./goalProjection";
+import {
+  allocateGoalsByDeadline,
+  buildGoalProjection,
+  fetchGoals,
+  fetchUserNetSavings,
+} from "./goalProjection";
 import OpenAI from "openai";
 
-export type AssistantIntent = "descriptive" | "predictive";
+export type AssistantIntent = "descriptive" | "predictive" | "prescriptive";
 export type ConfidenceLabel = "low" | "medium" | "high";
 
 export type AssistantSection = {
@@ -21,12 +26,40 @@ export type AssistantResponse = {
 };
 
 type AssistantNarration = Pick<AssistantResponse, "answerSummary" | "sections" | "suggestions">;
+type SuggestionRefinement = { suggestions: string[] };
 
 export type TxnRecord = {
   date: string;
   category: string;
   amount: number | string;
   type: "income" | "expense";
+};
+
+type ChatContextMessage = {
+  role: "user" | "assistant";
+  text: string;
+};
+
+type ScenarioContext = {
+  metric: "savings" | "income" | "expense";
+  horizonMonths: number;
+  direction?: "increase" | "decrease";
+  pct?: number;
+};
+
+type PromptPlan = {
+  intent: AssistantIntent;
+  subIntent: string;
+  metric?: "savings" | "income" | "expense";
+  horizonMonths?: number;
+  scenario?: {
+    direction: "increase" | "decrease";
+    pct: number;
+    metric: "savings" | "income" | "expense";
+  } | null;
+  useSelectedGoal: boolean;
+  needsClarification: boolean;
+  clarificationQuestion?: string;
 };
 
 const tokenize = (text: string) =>
@@ -44,6 +77,20 @@ const countOverlap = (tokens: string[], vocab: string[]) => {
 const detectIntent = (question: string): { intent: AssistantIntent; subIntent: string; confidenceHint: number } => {
   const q = question.toLowerCase();
   const tokens = tokenize(q);
+
+  // Hard intent overrides to avoid misrouting clear descriptive prompts.
+  if (/\bwhich month\b.*\b(spend|spending|expense)\b.*\b(most|highest|max)\b|\b(most|highest|max)\b.*\bmonth\b.*\b(spend|spending|expense)\b/.test(q)) {
+    return { intent: "descriptive", subIntent: "max_spend_month", confidenceHint: 0.98 };
+  }
+  if (/\bwhich month\b.*\b(spend|spending|expense)\b.*\b(least|lowest|min)\b|\b(least|lowest|min)\b.*\bmonth\b.*\b(spend|spending|expense)\b/.test(q)) {
+    return { intent: "descriptive", subIntent: "min_spend_month", confidenceHint: 0.98 };
+  }
+  if (/\btop\b.*\b(category|categories)\b|\b(category|categories)\b.*\btop\b/.test(q)) {
+    return { intent: "descriptive", subIntent: "top_categories", confidenceHint: 0.95 };
+  }
+  if (/\b(how can i|what should i|tips to|ways to)\b.*\b(save|savings|increase savings)\b/.test(q)) {
+    return { intent: "prescriptive", subIntent: "savings_improvement", confidenceHint: 0.92 };
+  }
 
   // Strong lexical overrides for forecast entity so expense/income prompts
   // do not fall back to savings forecast.
@@ -117,6 +164,11 @@ const detectIntent = (question: string): { intent: AssistantIntent; subIntent: s
         "savings in 6 months",
         "future expense forecast",
       ],
+      prescriptive: [
+        "how can i increase my savings",
+        "what should i reduce",
+        "how to save more each month",
+      ],
     };
 
     const qTokens = tokenize(q);
@@ -132,6 +184,10 @@ const detectIntent = (question: string): { intent: AssistantIntent; subIntent: s
 
     const d = scoreByIntent("descriptive");
     const p = scoreByIntent("predictive");
+    const r = scoreByIntent("prescriptive");
+    if (r > Math.max(d, p)) {
+      return { intent: "prescriptive", subIntent: "savings_improvement", confidenceHint: r };
+    }
     if (p > d) {
       return { intent: "predictive", subIntent: "general_predictive", confidenceHint: p };
     }
@@ -144,6 +200,32 @@ const detectIntent = (question: string): { intent: AssistantIntent; subIntent: s
     confidenceHint: Math.min(1, bestScore / 4),
   };
 };
+
+const isGeneralFinanceGuidanceQuestion = (question: string) => {
+  const q = question.toLowerCase();
+  return /\bbudget\b|\bdebt\b|\bloan\b|\binvest\b|\bcredit score\b|\bemergency fund\b|\bretirement\b|\btax\b|\binsurance\b|\bsave more\b/.test(
+    q,
+  );
+};
+
+const isStandaloneQuestion = (question: string) => {
+  const q = question.toLowerCase().trim();
+  if (!q) return true;
+  if (/^(which|what|how|when|where|who)\b/.test(q)) return true;
+  if (/\b(top categories|which month|forecast|spend the most|spend the least)\b/.test(q)) return true;
+  return false;
+};
+
+const shouldContextualizeQuestion = (question: string) => {
+  const q = question.toLowerCase();
+  if (isStandaloneQuestion(q)) return false;
+  return /\b(that|this|those|it|same|also|instead|baseline|what about|and)\b/.test(q);
+};
+
+const isBaselineWithoutScenarioQuestion = (question: string) =>
+  /\bbaseline\b.*\b(without|no)\b.*\bscenario\b|\bwithout\b.*\bscenario\b|\bback to baseline\b/.test(
+    question.toLowerCase(),
+  );
 
 const toAmount = (value: string | number) => {
   const n = Number(value);
@@ -161,6 +243,15 @@ const toConfidenceLabel = (probability: number): ConfidenceLabel => {
   if (probability >= 0.55) return "medium";
   return "low";
 };
+
+const confidenceScore = (label: ConfidenceLabel) => {
+  if (label === "high") return 0.85;
+  if (label === "medium") return 0.65;
+  return 0.45;
+};
+
+const messageLimit = 100;
+const threadLimit = 40;
 
 const openaiClient = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -188,13 +279,77 @@ const narrationSchema = {
   required: ["answerSummary", "sections", "suggestions"],
 } as const;
 
+const suggestionSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    suggestions: { type: "array", items: { type: "string" } },
+  },
+  required: ["suggestions"],
+} as const;
+
+const contextualQuerySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    resolvedQuestion: { type: "string" },
+  },
+  required: ["resolvedQuestion"],
+} as const;
+
+const plannerSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    intent: { type: "string", enum: ["descriptive", "predictive", "prescriptive"] },
+    subIntent: { type: "string" },
+    metric: { type: "string", enum: ["savings", "income", "expense"] },
+    horizonMonths: { type: "number" },
+    scenario: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            direction: { type: "string", enum: ["increase", "decrease"] },
+            pct: { type: "number" },
+            metric: { type: "string", enum: ["savings", "income", "expense"] },
+          },
+          required: ["direction", "pct", "metric"],
+        },
+      ],
+    },
+    useSelectedGoal: { type: "boolean" },
+    needsClarification: { type: "boolean" },
+    clarificationQuestion: { type: "string" },
+  },
+  required: [
+    "intent",
+    "subIntent",
+    "scenario",
+    "useSelectedGoal",
+    "needsClarification",
+    "clarificationQuestion",
+  ],
+} as const;
+
+const redactForLlm = (text: string) =>
+  text
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+    .replace(/\b\d{12,19}\b/g, "[redacted-account]")
+    .replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[redacted-ssn]")
+    .replace(/\b(?:\+?\d[\d\s().-]{8,}\d)\b/g, "[redacted-phone]")
+    .slice(0, 800);
+
 const narrateWithLlm = async (
   base: AssistantResponse,
   question: string,
 ): Promise<AssistantNarration | null> => {
   if (!openaiClient) return null;
   try {
-    const response = await openaiClient.responses.create({
+    const safeQuestion = redactForLlm(question);
+    const completionPromise = openaiClient.responses.create({
       model: "gpt-5-mini",
       input: [
         {
@@ -206,7 +361,7 @@ const narrateWithLlm = async (
         {
           role: "user",
           content: JSON.stringify({
-            question,
+            question: safeQuestion,
             deterministic_result: base,
             style: "plain-language rich report",
           }),
@@ -222,6 +377,11 @@ const narrateWithLlm = async (
       },
       max_output_tokens: 700,
     });
+    const response = await Promise.race([
+      completionPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1800)),
+    ]);
+    if (!response) return null;
 
     const raw = response.output_text?.trim();
     if (!raw) return null;
@@ -234,6 +394,178 @@ const narrateWithLlm = async (
       return null;
     }
     return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const refineSuggestionsWithLlm = async (
+  question: string,
+  candidates: string[],
+): Promise<string[] | null> => {
+  if (!openaiClient || !candidates.length) return null;
+  try {
+    const safeQuestion = redactForLlm(question);
+    const completionPromise = openaiClient.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "You improve follow-up user questions for a financial assistant. " +
+            "You must only rewrite or select from provided candidates. " +
+            "Do not introduce new analytics that were not in the candidates.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            user_question: safeQuestion,
+            candidate_followups: candidates.map((c) => redactForLlm(c)),
+            instruction: "Return at most 5 concise, diverse suggestions.",
+          }),
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "suggestion_refinement",
+          schema: suggestionSchema,
+          strict: true,
+        },
+      },
+      max_output_tokens: 250,
+    });
+    const response = await Promise.race([
+      completionPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1300)),
+    ]);
+    if (!response) return null;
+    const raw = response.output_text?.trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SuggestionRefinement;
+    if (!Array.isArray(parsed.suggestions)) return null;
+    const cleaned = parsed.suggestions
+      .map((s) => String(s || "").trim())
+      .filter(Boolean)
+      .slice(0, 5);
+    return cleaned.length ? cleaned : null;
+  } catch {
+    return null;
+  }
+};
+
+const contextualizeQuestionWithLlm = async (
+  question: string,
+  chatHistory: ChatContextMessage[],
+): Promise<string | null> => {
+  if (!openaiClient) return null;
+  if (!chatHistory.length) return null;
+  try {
+    const safeQuestion = redactForLlm(question);
+    const completionPromise = openaiClient.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "Convert follow-up financial questions into a standalone question using chat history. " +
+            "Do not answer the question. Keep wording concise and preserve user intent.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            latest_question: safeQuestion,
+            recent_chat: chatHistory.slice(-6).map((m) => ({ role: m.role, text: redactForLlm(m.text) })),
+          }),
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "contextual_query",
+          schema: contextualQuerySchema,
+          strict: true,
+        },
+      },
+      max_output_tokens: 150,
+    });
+
+    const response = await Promise.race([
+      completionPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1300)),
+    ]);
+    if (!response) return null;
+    const raw = response.output_text?.trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { resolvedQuestion?: string };
+    const resolved = String(parsed.resolvedQuestion ?? "").trim();
+    return resolved || null;
+  } catch {
+    return null;
+  }
+};
+
+const planPromptWithLlm = async (params: {
+  question: string;
+  chatHistory: ChatContextMessage[];
+  selectedGoalId: string | null;
+  startDate: string;
+  endDate: string;
+}): Promise<PromptPlan | null> => {
+  if (!openaiClient) return null;
+  const { question, chatHistory, selectedGoalId, startDate, endDate } = params;
+  try {
+    const completionPromise = openaiClient.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a planner for a financial assistant. Return only execution instructions in JSON. " +
+            "Do not answer the user question. Prefer deterministic analytics intents.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            user_question: redactForLlm(question),
+            recent_chat: chatHistory.slice(-6).map((m) => ({ role: m.role, text: redactForLlm(m.text) })),
+            selected_goal_provided: Boolean(selectedGoalId),
+            available_intents: ["descriptive", "predictive", "prescriptive"],
+            date_range: { startDate, endDate },
+          }),
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "prompt_plan",
+          schema: plannerSchema,
+          strict: true,
+        },
+      },
+      max_output_tokens: 220,
+    });
+    const response = await Promise.race([
+      completionPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1400)),
+    ]);
+    if (!response) return null;
+    const raw = response.output_text?.trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PromptPlan;
+    return {
+      ...parsed,
+      horizonMonths:
+        parsed.horizonMonths != null ? Math.max(1, Math.min(36, Math.round(parsed.horizonMonths))) : undefined,
+      scenario:
+        parsed.scenario && Number.isFinite(parsed.scenario.pct)
+          ? {
+              ...parsed.scenario,
+              pct: Math.max(0, Math.min(100, parsed.scenario.pct)),
+            }
+          : null,
+      clarificationQuestion: String(parsed.clarificationQuestion ?? "").trim(),
+    };
   } catch {
     return null;
   }
@@ -272,6 +604,35 @@ const parseScenarioAdjustment = (question: string): {
     direction,
     pct: Math.min(100, Math.max(0, pct)),
   };
+};
+
+const inferForecastMetric = (question: string): "savings" | "income" | "expense" => {
+  const q = question.toLowerCase();
+  if (/\bincome\b|\bsalary\b|\bearn/.test(q)) return "income";
+  if (/\bexpense\b|\bspend\b|\bcost/.test(q)) return "expense";
+  return "savings";
+};
+
+const findLastScenarioContext = (chatHistory: ChatContextMessage[]): ScenarioContext | null => {
+  for (let i = chatHistory.length - 1; i >= 0; i -= 1) {
+    const msg = chatHistory[i];
+    if (msg.role !== "user") continue;
+    const scenario = parseScenarioAdjustment(msg.text);
+    const metric = inferForecastMetric(msg.text);
+    const horizonMonths = parseHorizonMonths(msg.text);
+    if (scenario.detected) {
+      return {
+        metric: scenario.metric,
+        horizonMonths,
+        direction: scenario.direction,
+        pct: scenario.pct,
+      };
+    }
+    if (/\bforecast\b|\blook like\b|\bnext\b|\bmonth/.test(msg.text.toLowerCase())) {
+      return { metric, horizonMonths };
+    }
+  }
+  return null;
 };
 
 const fetchTransactionsInRange = async (userId: string, startDate: string, endDate: string) => {
@@ -321,29 +682,353 @@ const topCategories = (txns: TxnRecord[]) => {
     .map(([category, amount]) => ({ category, amount }));
 };
 
-const allocateGoalsByDeadline = (goals: GoalDoc[], totalSavings: number): GoalDoc[] => {
-  let pool = Math.max(0, totalSavings);
-  const sorted = [...goals].sort((a, b) => {
-    const aTime = new Date(a.deadline).getTime();
-    const bTime = new Date(b.deadline).getTime();
-    const aValid = Number.isFinite(aTime);
-    const bValid = Number.isFinite(bTime);
-    if (aValid && bValid) return aTime - bTime;
-    if (aValid) return -1;
-    if (bValid) return 1;
-    return a.createdAt.localeCompare(b.createdAt);
+const dedupeSuggestions = (items: string[]) => Array.from(new Set(items.map((s) => s.trim()).filter(Boolean)));
+
+const simplifyDirectAnswerText = (summary: string) => {
+  const s = summary.trim();
+  let m =
+    s.match(
+      /^If current trend continues, projected cumulative (savings|income|expenses) in (\d+) months is \$([-\d.,]+)\.?$/i,
+    );
+  if (m) {
+    return `At your current pace, your ${m[1].toLowerCase()} in the next ${m[2]} months is about $${m[3]}.`;
+  }
+
+  m = s.match(
+    /^Under this scenario .* projected cumulative savings in (\d+) months is \$([-\d.,]+) \(baseline \$([-\d.,]+)\)\.?$/i,
+  );
+  if (m) {
+    return `With this change, your estimated savings in ${m[1]} months is about $${m[2]} (baseline: $${m[3]}).`;
+  }
+
+  m = s.match(/^For goal "([^"]+)", you are (.+) with probability ([\d.]+)%\.?$/i);
+  if (m) {
+    return `For "${m[1]}", status is ${m[2]}. Chance to hit by deadline: ${m[3]}%.`;
+  }
+
+  m = s.match(/^For goal "([^"]+)", you need about \$([-\d.,]+)\/month more savings to stay on deadline\.?$/i);
+  if (m) {
+    return `For "${m[1]}", you need about $${m[2]} more savings each month to stay on track.`;
+  }
+
+  return s;
+};
+
+const applySimpleDirectAnswer = (response: AssistantResponse): AssistantResponse => {
+  const simple = simplifyDirectAnswerText(response.answerSummary);
+  const sections = response.sections.map((section) => {
+    if (section.title.toLowerCase() !== "direct answer") return section;
+    return {
+      ...section,
+      points: section.points.length ? [simple, ...section.points.slice(1)] : [simple],
+    };
   });
 
-  return sorted.map((goal) => {
-    const target = Math.max(0, Number(goal.targetAmount) || 0);
-    const hasOverride = goal.allocationOverride != null;
-    const overrideRaw = hasOverride ? Number(goal.allocationOverride) : 0;
-    const validOverride = hasOverride && Number.isFinite(overrideRaw) && overrideRaw >= 0;
-    const requested = validOverride ? Math.min(target, overrideRaw) : target;
-    const allocated = Math.min(requested, pool);
-    pool = Math.max(0, pool - allocated);
-    return { ...goal, currentAmount: allocated };
+  return {
+    ...response,
+    answerSummary: simple,
+    sections,
+  };
+};
+
+const buildDescriptiveSuggestions = (params: {
+  monthly: Array<{ month: string; income: number; expense: number; savings: number }>;
+  categories: Array<{ category: string; amount: number }>;
+  subIntent: string;
+}) => {
+  const { monthly, categories, subIntent } = params;
+  const topCategory = categories[0]?.category;
+  const secondCategory = categories[1]?.category;
+  const highestMonth = monthly.length ? [...monthly].sort((a, b) => b.expense - a.expense)[0]?.month : null;
+  const lowestMonth = monthly.length ? [...monthly].sort((a, b) => a.expense - b.expense)[0]?.month : null;
+
+  const suggestions = [
+    "Forecast my savings for the next 6 months.",
+    "Which month was unusual and why?",
+    "Show my highest spending month in this range.",
+  ];
+
+  if (topCategory) suggestions.push(`How much do I spend on ${topCategory} in this range?`);
+  if (secondCategory) suggestions.push(`Compare my spend on ${topCategory} vs ${secondCategory}.`);
+  if (highestMonth) suggestions.push(`Why was my spending high in ${highestMonth}?`);
+  if (lowestMonth) suggestions.push(`Why was my spending low in ${lowestMonth}?`);
+  if (subIntent !== "top_categories") suggestions.push("What are my top expense categories?");
+  if (subIntent !== "max_spend_month") suggestions.push("Which month did I spend the most?");
+  if (subIntent !== "min_spend_month") suggestions.push("Which month did I spend the least?");
+
+  return dedupeSuggestions(suggestions).slice(0, 6);
+};
+
+const buildPredictiveSuggestions = (params: {
+  monthly: Array<{ month: string; income: number; expense: number; savings: number }>;
+  categories: Array<{ category: string; amount: number }>;
+  selectedGoalName: string | null;
+  horizon: number;
+  forecastMetric: "savings" | "income" | "expense";
+  scenarioDetected: boolean;
+}) => {
+  const { categories, selectedGoalName, horizon, forecastMetric, scenarioDetected } = params;
+  const altHorizon = horizon === 6 ? 3 : 6;
+  const topCategory = categories[0]?.category;
+  const suggestions = [
+    `What will my ${forecastMetric === "savings" ? "savings" : forecastMetric === "income" ? "income" : "expenses"} look like in ${altHorizon} months?`,
+    "Which month did I spend the most in this range?",
+  ];
+
+  if (selectedGoalName) {
+    suggestions.push(`Will I hit ${selectedGoalName} by its deadline?`);
+    suggestions.push(`When will I reach ${selectedGoalName}?`);
+  } else {
+    suggestions.push("Will I hit my selected goal by its deadline?");
+  }
+
+  if (!scenarioDetected) {
+    suggestions.push("What if my monthly savings increases by 10%?");
+    suggestions.push("What if my monthly expenses decrease by 10%?");
+  } else {
+    suggestions.push("Show baseline forecast without scenario changes.");
+  }
+
+  if (topCategory) suggestions.push(`If I reduce ${topCategory} by 10%, how does my 6-month savings change?`);
+  suggestions.push("What are my top expense categories?");
+
+  return dedupeSuggestions(suggestions).slice(0, 6);
+};
+
+const buildGuidanceResponse = async (
+  question: string,
+  monthly: Array<{ month: string; income: number; expense: number; savings: number }>,
+): Promise<AssistantResponse> => {
+  const avgSavings = monthly.length ? monthly.reduce((s, m) => s + m.savings, 0) / monthly.length : 0;
+  const avgExpense = monthly.length ? monthly.reduce((s, m) => s + m.expense, 0) / monthly.length : 0;
+  const avgIncome = monthly.length ? monthly.reduce((s, m) => s + m.income, 0) / monthly.length : 0;
+
+  const base: AssistantResponse = {
+    intent: "descriptive",
+    subIntent: "financial_guidance",
+    confidence: monthly.length >= 3 ? "medium" : "low",
+    answerSummary:
+      "Here is practical financial guidance based on your question and the selected date-range behavior.",
+    sections: [
+      {
+        title: "Practical Guidance",
+        points: [
+          "Use a monthly budget split for fixed needs, flexible wants, and savings first.",
+          "Track one category to reduce this month and move that amount directly to savings.",
+          "Set a weekly spending cap for discretionary categories to avoid end-of-month spikes.",
+        ],
+      },
+      {
+        title: "Your Current Baseline",
+        points: [
+          `Average monthly income: $${avgIncome.toFixed(2)}`,
+          `Average monthly expenses: $${avgExpense.toFixed(2)}`,
+          `Average monthly savings: $${avgSavings.toFixed(2)}`,
+        ],
+      },
+    ],
+    evidence: [
+      { label: "Months analyzed", value: String(monthly.length) },
+      { label: "Question", value: question },
+    ],
+    suggestions: [
+      "What is one category I should cut first based on my data?",
+      "If I reduce discretionary spend by 10%, how much more can I save in 6 months?",
+      "Build a monthly budget target for me using this date range.",
+    ],
+  };
+
+  if (!openaiClient) return base;
+  try {
+    const safeQuestion = redactForLlm(question);
+    const completionPromise = openaiClient.responses.create({
+      model: "gpt-5-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a financial assistant. Provide practical, plain-language guidance. " +
+            "Use provided user metrics only; do not invent numbers.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            question: safeQuestion,
+            user_metrics: {
+              avgIncome,
+              avgExpense,
+              avgSavings,
+              monthsAnalyzed: monthly.length,
+            },
+            format: "rich report with short actionable bullets",
+          }),
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "assistant_narration",
+          schema: narrationSchema,
+          strict: true,
+        },
+      },
+      max_output_tokens: 600,
+    });
+    const response = await Promise.race([
+      completionPromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1800)),
+    ]);
+    if (!response) return base;
+    const raw = response.output_text?.trim();
+    if (!raw) return base;
+    const parsed = JSON.parse(raw) as AssistantNarration;
+    return {
+      ...base,
+      answerSummary: parsed.answerSummary || base.answerSummary,
+      sections: Array.isArray(parsed.sections) && parsed.sections.length ? parsed.sections : base.sections,
+      suggestions:
+        Array.isArray(parsed.suggestions) && parsed.suggestions.length
+          ? parsed.suggestions.slice(0, 5)
+          : base.suggestions,
+      confidence: monthly.length >= 3 ? "high" : "medium",
+    };
+  } catch {
+    return base;
+  }
+};
+
+const buildPrescriptiveSavingsResponse = async (
+  userId: string,
+  question: string,
+  txns: TxnRecord[],
+  selectedGoalId: string | null,
+): Promise<AssistantResponse> => {
+  const monthly = monthlyTotals(txns);
+  const monthsAnalyzed = Math.max(1, monthly.length);
+  const rawTopCategories = topCategories(txns);
+  const avgIncome = monthly.length ? monthly.reduce((s, m) => s + m.income, 0) / monthly.length : 0;
+  const avgExpense = monthly.length ? monthly.reduce((s, m) => s + m.expense, 0) / monthly.length : 0;
+  const avgSavings = monthly.length ? monthly.reduce((s, m) => s + m.savings, 0) / monthly.length : 0;
+
+  const fixedLikePattern = /\b(rent|mortgage|loan|insurance|tuition|debt|emi|utilities)\b/i;
+  const rankedCategories = rawTopCategories
+    .map((c) => ({
+      ...c,
+      monthlyAvg: c.amount / monthsAnalyzed,
+      flexibilityScore: fixedLikePattern.test(c.category) ? 0.7 : 1.0,
+      estimatedReduciblePct: fixedLikePattern.test(c.category) ? 0.08 : 0.2,
+    }))
+    .sort((a, b) => b.monthlyAvg * b.flexibilityScore - a.monthlyAvg * a.flexibilityScore);
+  const top = rankedCategories.slice(0, 4);
+
+  let goalName: string | null = null;
+  let requiredMonthlyToHitDeadline: number | null = null;
+  let predictedMonthlySavings: number | null = null;
+  let monthlyShortfallToGoal = 0;
+
+  if (selectedGoalId) {
+    const goals = await fetchGoals(userId);
+    const totalSavings = await fetchUserNetSavings(userId);
+    const allocatedGoals = allocateGoalsByDeadline(goals, totalSavings);
+    const goal = allocatedGoals.find((g) => g.id === selectedGoalId) ?? null;
+    if (goal) {
+      goalName = goal.name;
+      const projection = await buildGoalProjection(userId, goal);
+      requiredMonthlyToHitDeadline = projection.contract.requiredMonthlyToHitDeadline ?? null;
+      predictedMonthlySavings = projection.predictedMonthlySavings ?? null;
+      if (requiredMonthlyToHitDeadline != null && predictedMonthlySavings != null) {
+        monthlyShortfallToGoal = Math.max(0, requiredMonthlyToHitDeadline - predictedMonthlySavings);
+      }
+    }
+  }
+
+  const scenarios = [0.05, 0.1, 0.2].map((pct) => {
+    const impacted = top.reduce((sum, c) => sum + c.monthlyAvg * pct * c.flexibilityScore, 0);
+    return {
+      pct,
+      monthlyImpact: impacted,
+      sixMonthImpact: impacted * 6,
+      projectedSavings6m: avgSavings * 6 + impacted * 6,
+      closesGap: monthlyShortfallToGoal > 0 ? impacted >= monthlyShortfallToGoal : true,
+    };
   });
+
+  const best = scenarios[2];
+  const topCategory = top[0];
+  const neededPctForTop = topCategory
+    ? Math.max(0, Math.min(100, (monthlyShortfallToGoal / Math.max(1, topCategory.monthlyAvg)) * 100))
+    : null;
+  const summary = goalName && monthlyShortfallToGoal > 0
+    ? `For goal "${goalName}", you need about $${monthlyShortfallToGoal.toFixed(2)}/month more savings to stay on deadline. Prioritize reducing ${top.map((c) => c.category).join(", ")}.`
+    : top.length
+      ? `A practical way to increase savings is reducing ${top.map((c) => c.category).join(", ")} spending incrementally. A 10% reduction across these categories is estimated to add about $${scenarios[1].monthlyImpact.toFixed(2)} per month.`
+      : "To increase savings, reduce variable categories first and move the reduced amount to a scheduled savings transfer.";
+
+  return {
+    intent: "prescriptive",
+    subIntent: "savings_improvement",
+    confidence: monthly.length >= 6 ? "high" : monthly.length >= 3 ? "medium" : "low",
+    answerSummary: summary,
+    sections: [
+      { title: "Direct Answer", points: [summary] },
+      {
+        title: "Highest-Impact Categories",
+        points: top.length
+          ? top.map((c, idx) => `${idx + 1}. ${c.category}: $${c.amount.toFixed(2)} in selected range (~$${c.monthlyAvg.toFixed(2)}/month)`)
+          : ["No category breakdown available in this range."],
+      },
+      ...(goalName
+        ? [
+            {
+              title: "Goal Deadline Gap",
+              points: [
+                `Goal: ${goalName}`,
+                `Required monthly savings to hit deadline: $${(requiredMonthlyToHitDeadline ?? 0).toFixed(2)}`,
+                `Current predicted monthly savings: $${(predictedMonthlySavings ?? avgSavings).toFixed(2)}`,
+                `Monthly shortfall to close: $${monthlyShortfallToGoal.toFixed(2)}`,
+              ],
+            },
+          ]
+        : []),
+      {
+        title: "Sensitivity Simulation",
+        points: scenarios.map(
+          (s) => `${Math.round(s.pct * 100)}% reduction => +$${s.monthlyImpact.toFixed(2)}/month, +$${s.sixMonthImpact.toFixed(2)} in 6 months (projected 6-month savings: $${s.projectedSavings6m.toFixed(2)})${goalName ? s.closesGap ? " [closes goal gap]" : " [does not fully close goal gap]" : ""}.`,
+        ),
+      },
+      {
+        title: "Recommended Plan",
+        points: [
+          ...(goalName && neededPctForTop != null
+            ? [`To close the full gap using ${topCategory?.category ?? "top category"} alone, target about ${neededPctForTop.toFixed(1)}% reduction there (or split across top categories).`]
+            : []),
+          `Start with a ${Math.round(best.pct * 100)}% reduction in top variable categories.`,
+          "Set an automatic transfer equal to expected monthly impact on income day.",
+          "Review progress after 4 weeks and adjust percentage up/down.",
+        ],
+      },
+    ],
+    evidence: [
+      { label: "Months analyzed", value: String(monthly.length) },
+      { label: "Top categories used", value: top.map((c) => c.category).join(", ") || "None" },
+      { label: "Average monthly income", value: `$${avgIncome.toFixed(2)}` },
+      { label: "Average monthly expense", value: `$${avgExpense.toFixed(2)}` },
+      { label: "Average monthly savings", value: `$${avgSavings.toFixed(2)}` },
+      ...(goalName
+        ? [
+            { label: "Selected goal", value: goalName },
+            { label: "Monthly shortfall to goal", value: `$${monthlyShortfallToGoal.toFixed(2)}` },
+          ]
+        : []),
+      { label: "Question", value: question },
+    ],
+    suggestions: [
+      "What if I cut these categories by only 5%?",
+      "Show a 3-month savings impact for this plan.",
+      "Which month had my largest overspending spike?",
+      "What will my savings look like in 6 months if I follow this?",
+    ],
+  };
 };
 
 const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent: string): AssistantResponse => {
@@ -407,11 +1092,7 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
       { label: "Transactions analyzed", value: String(txns.length) },
       { label: "Question", value: question },
     ],
-    suggestions: [
-      "Which month was unusual and why?",
-      "Show top categories and their trend over this range.",
-      "Forecast my savings for the next 6 months.",
-    ],
+    suggestions: buildDescriptiveSuggestions({ monthly, categories, subIntent }),
   };
 };
 
@@ -423,6 +1104,7 @@ const buildPredictiveResponse = async (
   subIntent: string,
 ): Promise<AssistantResponse> => {
   const monthly = monthlyTotals(txns);
+  const categories = topCategories(txns);
   const horizon = parseHorizonMonths(question);
   const scenario = parseScenarioAdjustment(question);
 
@@ -492,12 +1174,14 @@ const buildPredictiveResponse = async (
     );
   }
 
+  let selectedGoalName: string | null = null;
   if (selectedGoalId) {
     const goals = await fetchGoals(userId);
     const totalSavings = await fetchUserNetSavings(userId);
     const allocatedGoals = allocateGoalsByDeadline(goals, totalSavings);
     const goal = allocatedGoals.find((g) => g.id === selectedGoalId) ?? null;
     if (goal) {
+      selectedGoalName = goal.name;
       const isAchieved = (Number(goal.currentAmount) || 0) >= (Number(goal.targetAmount) || 0);
       const projection = await buildGoalProjection(userId, goal);
       if (isAchieved) {
@@ -599,11 +1283,14 @@ const buildPredictiveResponse = async (
       },
     ],
     evidence,
-    suggestions: [
-      "Will I hit my selected goal by its deadline?",
-      "What if my monthly savings increases by 10%?",
-      "Show my highest spending month in this range.",
-    ],
+    suggestions: buildPredictiveSuggestions({
+      monthly,
+      categories,
+      selectedGoalName,
+      horizon,
+      forecastMetric,
+      scenarioDetected: scenario.detected,
+    }),
   };
 };
 
@@ -613,9 +1300,77 @@ export const answerAssistantQuestion = async (params: {
   startDate: string;
   endDate: string;
   selectedGoalId?: string | null;
+  chatHistory?: ChatContextMessage[];
 }) => {
-  const { userId, question, startDate, endDate, selectedGoalId } = params;
-  const intent = detectIntent(question);
+  const { userId, question, startDate, endDate, selectedGoalId, chatHistory = [] } = params;
+  const trimmedQuestion = question.trim();
+  const planner = await planPromptWithLlm({
+    question: trimmedQuestion,
+    chatHistory,
+    selectedGoalId: selectedGoalId ?? null,
+    startDate,
+    endDate,
+  });
+
+  if (planner?.needsClarification && planner.clarificationQuestion) {
+    return {
+      intent: planner.intent,
+      subIntent: planner.subIntent || "clarification_needed",
+      confidence: "medium",
+      answerSummary: planner.clarificationQuestion,
+      sections: [
+        { title: "Need Clarification", points: [planner.clarificationQuestion] },
+      ],
+      evidence: [
+        { label: "Planner", value: "llm" },
+      ],
+      suggestions: [
+        "Use my selected goal and answer this.",
+        "Use savings forecast for the next 6 months.",
+      ],
+    } satisfies AssistantResponse;
+  }
+
+  const priorScenario = findLastScenarioContext(chatHistory);
+  const maybeContextualized =
+    shouldContextualizeQuestion(trimmedQuestion) && chatHistory.length
+      ? await contextualizeQuestionWithLlm(trimmedQuestion, chatHistory)
+      : null;
+
+  let effectiveQuestion = maybeContextualized ?? trimmedQuestion;
+  if (planner) {
+    const planHorizon = planner.horizonMonths ?? parseHorizonMonths(effectiveQuestion);
+    const planMetric = planner.metric ?? inferForecastMetric(effectiveQuestion);
+    if (planner.intent === "predictive") {
+      effectiveQuestion = `What will my ${planMetric} look like in ${planHorizon} months?`;
+      if (planner.scenario) {
+        effectiveQuestion = `What if my ${planner.scenario.metric} ${planner.scenario.direction}s by ${planner.scenario.pct}% in ${planHorizon} months?`;
+      }
+    }
+    if (planner.intent === "prescriptive" && planner.subIntent === "savings_improvement") {
+      effectiveQuestion = `How can I increase my savings${planner.useSelectedGoal && selectedGoalId ? " to hit my selected goal deadline" : ""}?`;
+    }
+  }
+
+  if (isBaselineWithoutScenarioQuestion(trimmedQuestion) && priorScenario) {
+    effectiveQuestion = `What will my ${priorScenario.metric} look like in ${priorScenario.horizonMonths} months?`;
+  } else {
+    const parsedScenario = parseScenarioAdjustment(effectiveQuestion);
+    if (parsedScenario.detected && !/\b(savings|income|expense|spending|cost)\b/i.test(effectiveQuestion) && priorScenario) {
+      effectiveQuestion = `${effectiveQuestion} for ${priorScenario.metric}`;
+    }
+    if (parsedScenario.detected && !/\b\d+\s*month/i.test(effectiveQuestion) && priorScenario) {
+      effectiveQuestion = `${effectiveQuestion} in ${priorScenario.horizonMonths} months`;
+    }
+  }
+
+  const intent = planner
+    ? {
+        intent: planner.intent,
+        subIntent: planner.subIntent || "general_descriptive",
+        confidenceHint: 0.9,
+      }
+    : detectIntent(effectiveQuestion);
   const txns = await fetchTransactionsInRange(userId, startDate, endDate);
 
   if (!txns.length) {
@@ -641,31 +1396,88 @@ export const answerAssistantQuestion = async (params: {
         "Add or import transactions.",
       ],
     } satisfies AssistantResponse;
-    const narrated = await narrateWithLlm(baseNoData, question);
-    if (!narrated) return baseNoData;
-    return {
+    const narrated = await narrateWithLlm(baseNoData, effectiveQuestion);
+    const refined = await refineSuggestionsWithLlm(effectiveQuestion, baseNoData.suggestions);
+    if (!narrated) {
+      return applySimpleDirectAnswer({
+        ...baseNoData,
+        suggestions: (refined ?? baseNoData.suggestions).slice(0, 5),
+      });
+    }
+    return applySimpleDirectAnswer({
       ...baseNoData,
       answerSummary: narrated.answerSummary,
       sections: narrated.sections,
-      suggestions: narrated.suggestions.slice(0, 5),
-    };
+      suggestions: (refined ?? narrated.suggestions ?? baseNoData.suggestions).slice(0, 5),
+    });
   }
 
+  const monthly = monthlyTotals(txns);
   const baseResponse =
-    intent.intent === "predictive"
-      ? await buildPredictiveResponse(userId, question, txns, selectedGoalId ?? null, intent.subIntent)
-      : buildDescriptiveResponse(question, txns, intent.subIntent);
+    intent.intent === "prescriptive"
+      ? await buildPrescriptiveSavingsResponse(userId, effectiveQuestion, txns, selectedGoalId ?? null)
+      : isGeneralFinanceGuidanceQuestion(effectiveQuestion) && intent.subIntent === "general_descriptive"
+        ? await buildGuidanceResponse(effectiveQuestion, monthly)
+        : intent.intent === "predictive"
+        ? await buildPredictiveResponse(
+            userId,
+            effectiveQuestion,
+            txns,
+            selectedGoalId ?? null,
+            intent.subIntent,
+          )
+        : buildDescriptiveResponse(effectiveQuestion, txns, intent.subIntent);
 
-  const narrated = await narrateWithLlm(baseResponse, question);
-  if (!narrated) {
-    return baseResponse;
-  }
-  return {
+  // Blend rule/keyword intent confidence with data-backed response confidence.
+  const txCountBoost = txns.length >= 25 ? 0.06 : txns.length >= 10 ? 0.03 : 0;
+  const blendedConfidence = Math.max(
+    confidenceScore(baseResponse.confidence),
+    Math.min(1, intent.confidenceHint + txCountBoost),
+  );
+  const responseWithConfidence: AssistantResponse = {
     ...baseResponse,
+    confidence: toConfidenceLabel(blendedConfidence),
+    sections: [
+      ...baseResponse.sections,
+      ...(baseResponse.intent === "predictive" && monthly.length < 3
+        ? [
+            {
+              title: "Data Quality Warning",
+              points: [
+                `Only ${monthly.length} month(s) found in selected range; forecast uncertainty is high.`,
+                "Use at least 3-6 months of data for more stable projections.",
+              ],
+            },
+          ]
+        : []),
+      {
+        title: "Important Note",
+        points: [
+          "This is analytical guidance, not financial advice.",
+          "Forecast quality depends on date-range coverage and transaction quality.",
+        ],
+      },
+    ],
+  };
+
+  const narrated = await narrateWithLlm(responseWithConfidence, effectiveQuestion);
+  const suggestionCandidates = dedupeSuggestions([
+    ...responseWithConfidence.suggestions,
+    ...(narrated?.suggestions ?? []),
+  ]).slice(0, 8);
+  const refinedSuggestions = await refineSuggestionsWithLlm(effectiveQuestion, suggestionCandidates);
+  if (!narrated) {
+    return applySimpleDirectAnswer({
+      ...responseWithConfidence,
+      suggestions: (refinedSuggestions ?? responseWithConfidence.suggestions).slice(0, 5),
+    });
+  }
+  return applySimpleDirectAnswer({
+    ...responseWithConfidence,
     answerSummary: narrated.answerSummary,
     sections: narrated.sections,
-    suggestions: narrated.suggestions.slice(0, 5),
-  };
+    suggestions: (refinedSuggestions ?? suggestionCandidates).slice(0, 5),
+  });
 };
 
 export const buildQuickIntents = async (params: {
@@ -701,6 +1513,39 @@ export const buildQuickIntents = async (params: {
   return suggestions.slice(0, 6);
 };
 
+const quickIntentCache = new Map<string, { expiresAt: number; intents: string[] }>();
+const QUICK_INTENT_TTL_MS = 60 * 1000;
+
+export const buildQuickIntentsCached = async (params: {
+  userId: string;
+  startDate: string;
+  endDate: string;
+}) => {
+  const key = `${params.userId}:${params.startDate}:${params.endDate}`;
+  const now = Date.now();
+  const hit = quickIntentCache.get(key);
+  if (hit && hit.expiresAt > now) return hit.intents;
+  const intents = await buildQuickIntents(params);
+  quickIntentCache.set(key, { intents, expiresAt: now + QUICK_INTENT_TTL_MS });
+  return intents;
+};
+
+export const getAssistantHealth = () => ({
+  status: "ok" as const,
+  llmEnabled: Boolean(openaiClient),
+  plannerEnabled: Boolean(openaiClient),
+  privacyMode: "redacted-minimum-context",
+  model: openaiClient ? "gpt-5-mini" : null,
+  cache: {
+    quickIntentKeys: quickIntentCache.size,
+    quickIntentTtlMs: QUICK_INTENT_TTL_MS,
+  },
+  limits: {
+    threadLimit,
+    messageLimit,
+  },
+});
+
 export const createAssistantThread = async (userId: string, title: string) => {
   const nowIso = new Date().toISOString();
   const ref = firestore.collection("users").doc(userId).collection("assistant_chats").doc();
@@ -720,20 +1565,27 @@ export const listAssistantThreads = async (userId: string) => {
     .doc(userId)
     .collection("assistant_chats")
     .orderBy("updatedAt", "desc")
+    .limit(threadLimit)
     .get();
   return snap.docs.map((d) => d.data());
 };
 
-export const getAssistantThreadMessages = async (userId: string, chatId: string) => {
+export const getAssistantThreadMessages = async (
+  userId: string,
+  chatId: string,
+  limit = messageLimit,
+) => {
+  const safeLimit = Math.max(1, Math.min(messageLimit, limit));
   const snap = await firestore
     .collection("users")
     .doc(userId)
     .collection("assistant_chats")
     .doc(chatId)
     .collection("messages")
-    .orderBy("createdAt", "asc")
+    .orderBy("createdAt", "desc")
+    .limit(safeLimit)
     .get();
-  return snap.docs.map((d) => d.data());
+  return snap.docs.map((d) => d.data()).reverse();
 };
 
 export const appendAssistantMessage = async (params: {
@@ -779,4 +1631,36 @@ export const hardDeleteAssistantThread = async (userId: string, chatId: string) 
   messages.docs.forEach((d) => batch.delete(d.ref));
   batch.delete(threadRef);
   await batch.commit();
+};
+
+export const renameAssistantThread = async (userId: string, chatId: string, title: string) => {
+  const safeTitle = title.trim().slice(0, 80) || "New Chat";
+  await firestore
+    .collection("users")
+    .doc(userId)
+    .collection("assistant_chats")
+    .doc(chatId)
+    .set(
+      {
+        title: safeTitle,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+};
+
+export const exportAssistantThread = async (userId: string, chatId: string) => {
+  const threadRef = firestore.collection("users").doc(userId).collection("assistant_chats").doc(chatId);
+  const [threadSnap, messages] = await Promise.all([
+    threadRef.get(),
+    getAssistantThreadMessages(userId, chatId, messageLimit),
+  ]);
+  if (!threadSnap.exists) {
+    throw new Error("Chat not found.");
+  }
+  return {
+    thread: threadSnap.data(),
+    messages,
+    exportedAt: new Date().toISOString(),
+  };
 };

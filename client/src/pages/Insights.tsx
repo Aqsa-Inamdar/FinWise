@@ -552,29 +552,29 @@ export default function Insights() {
             const accent = getAccent(insight.type);
             const bullets = buildBullets(insight);
             return (
-              <div key={insight.id} className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div key={insight.id} className="rounded-2xl border bg-card p-5 shadow-sm">
                 <div className="flex items-start gap-3">
                   <div className={`flex h-11 w-11 items-center justify-center rounded-full ${accent}`}>
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold text-slate-900">{displayTitle(insight)}</h3>
-                    <p className="mt-2 text-sm text-slate-600">
+                    <h3 className="text-base font-semibold text-foreground">{displayTitle(insight)}</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">
                       {insight.message}
                       {insight.recommendation ? ` ${insight.recommendation}` : ""}
                     </p>
                   </div>
                 </div>
                 {bullets.length > 0 && (
-                  <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                  <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                     {bullets.map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
                 )}
                 {insight.recommendation && (
-                  <p className="mt-3 text-sm font-medium text-slate-900">
-                    Next step: <span className="font-normal text-slate-600">{insight.recommendation}</span>
+                  <p className="mt-3 text-sm font-medium text-foreground">
+                    Next step: <span className="font-normal text-muted-foreground">{insight.recommendation}</span>
                   </p>
                 )}
                 <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -582,7 +582,7 @@ export default function Insights() {
                     Why this insight
                   </Button>
                   {insight.type === "executive_summary" && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
                       <Activity className="h-3 w-3" /> Summary
                     </span>
                   )}

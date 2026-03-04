@@ -59,6 +59,7 @@ export default function Dashboard() {
   const [endMonth, setEndMonth] = useState(defaultEndMonth);
   const [showIncome, setShowIncome] = useState(true);
   const [showExpenses, setShowExpenses] = useState(true);
+  const [selectedExpenseCategory, setSelectedExpenseCategory] = useState("all");
 
   const monthKey = (year: number, monthIndex: number) =>
     `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
@@ -85,6 +86,29 @@ export default function Dashboard() {
     return map;
   }, [transactions]);
 
+  const monthlyCategoryExpenses = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    transactions.forEach((txn) => {
+      if (txn.type !== "expense") return;
+      const date = new Date(txn.date);
+      if (Number.isNaN(date.getTime())) return;
+      const key = monthKey(date.getUTCFullYear(), date.getUTCMonth());
+      const categoryMapForMonth = map.get(key) ?? new Map<string, number>();
+      const category = txn.category || "Uncategorized";
+      categoryMapForMonth.set(category, (categoryMapForMonth.get(category) ?? 0) + Number(txn.amount));
+      map.set(key, categoryMapForMonth);
+    });
+    return map;
+  }, [transactions]);
+
+  const expenseCategories = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach((txn) => {
+      if (txn.type === "expense" && txn.category) set.add(txn.category);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [transactions]);
+
   const normalizeRange = (newStartYear: number, newStartMonth: number, newEndYear: number, newEndMonth: number) => {
     const start = new Date(Date.UTC(newStartYear, newStartMonth, 1));
     const end = new Date(Date.UTC(newEndYear, newEndMonth, 1));
@@ -103,15 +127,20 @@ export default function Dashboard() {
     while (cursor <= end) {
       const key = monthKey(cursor.getUTCFullYear(), cursor.getUTCMonth());
       const entry = monthlyTotals.get(key) ?? { income: 0, expenses: 0 };
+      const categoryMonth = monthlyCategoryExpenses.get(key);
+      const categoryExpense =
+        selectedExpenseCategory === "all"
+          ? entry.expenses
+          : categoryMonth?.get(selectedExpenseCategory) ?? 0;
       points.push({
         month: `${monthLabels[cursor.getUTCMonth()]} ${String(cursor.getUTCFullYear()).slice(2)}`,
         income: entry.income,
-        expenses: entry.expenses,
+        expenses: categoryExpense,
       });
       cursor.setUTCMonth(cursor.getUTCMonth() + 1);
     }
     return points;
-  }, [startYear, startMonth, endYear, endMonth, monthlyTotals]);
+  }, [startYear, startMonth, endYear, endMonth, monthlyTotals, monthlyCategoryExpenses, selectedExpenseCategory]);
 
   const handleStartChange = (nextYear: number, nextMonth: number) => {
     const normalized = normalizeRange(nextYear, nextMonth, endYear, endMonth);
@@ -346,12 +375,31 @@ export default function Dashboard() {
                   Expenses
                 </label>
               </div>
+
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Expense category</p>
+                <Select value={selectedExpenseCategory} onValueChange={setSelectedExpenseCategory}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="All expenses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All expenses</SelectItem>
+                    {expenseCategories.map((category) => (
+                      <SelectItem key={`expense-category-${category}`} value={category}>
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <TrendChart
               data={trendData}
+              title={selectedExpenseCategory === "all" ? "Income vs Expenses Trend" : `Income vs ${selectedExpenseCategory} Trend`}
               showIncome={showIncome}
               showExpenses={showExpenses}
+              expensesLabel={selectedExpenseCategory === "all" ? "Expenses" : selectedExpenseCategory}
               aria-hidden="true"
             />
           </div>
