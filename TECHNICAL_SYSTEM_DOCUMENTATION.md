@@ -209,51 +209,45 @@ Insights are built from monthly transaction aggregation in `server/insights.ts` 
 
 ### Savings Rate
 
-\[
-\text{savingsRate} =
-\begin{cases}
-\frac{\text{income} - \text{expenses}}{\text{income}}, & \text{if income} > 0 \\
-\text{null}, & \text{otherwise}
-\end{cases}
-\]
+Savings rate:
+
+`savingsRate = (income - expenses) / income`, if `income > 0`; otherwise `null`.
 
 ### Percent Change
 
-\[
-\Delta\% = \frac{\text{current} - \text{baseline}}{\text{baseline}}
-\]
+Percent change:
+
+`deltaPct = (current - baseline) / baseline`
 
 ### Coefficient of Variation (daily spend variability)
 
-\[
-CV = \frac{\sigma}{\mu}
-\]
+Coefficient of variation:
+
+`CV = stdDev / mean`
 
 where:
-- \(\mu\) = mean daily spend
-- \(\sigma\) = std. dev. of daily spend
+- `mean` = mean daily spend
+- `stdDev` = standard deviation of daily spend
 
 ### Category Entropy (spend concentration)
 
-\[
-H = -\sum_i p_i \log_2(p_i)
-\]
+Category entropy:
 
-where \(p_i\) is category share of total expense.
+`H = -sum(p_i * log2(p_i))` for all categories `i`
+
+where `p_i` is category share of total expense.
 
 ### Structural Shift Score (distribution change)
 
-\[
-\text{shift} = \frac{1}{2} \sum_i |p_i^{(current)} - p_i^{(previous)}|
-\]
+Structural shift:
+
+`shift = 0.5 * sum(abs(p_i_current - p_i_previous))` for all categories `i`
 
 ### Weekend vs Weekday Differential
 
-\[
-\text{differentialPct} =
-\frac{|\text{weekdayAvg} - \text{weekendAvg}|}
-{\max(\text{weekdayAvg}, \text{weekendAvg})}
-\]
+Weekend vs weekday differential:
+
+`differentialPct = abs(weekdayAvg - weekendAvg) / max(weekdayAvg, weekendAvg)`
 
 Meaningful if thresholds are satisfied in code (magnitude + minimum observed days).
 
