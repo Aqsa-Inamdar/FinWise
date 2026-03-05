@@ -90,6 +90,7 @@ Assistant was upgraded into a financial reasoning workflow:
 - deterministic analytics/model execution
 - structured response output
 - LLM-based readability improvement
+- deterministic guardrails + LLM planner hybrid routing
 
 Supported query classes:
 
@@ -104,6 +105,8 @@ Additional enhancements:
 - bottom-only suggestion buttons in UI
 - prompt understanding + planner/executor/narrator structure
 - privacy-aware LLM input redaction/minimization
+- low-confidence generic queries now trigger clarification (instead of unsafe guessing)
+- added robust handling for category-specific and unusual-month prompts
 
 ## 4.3 Goal-Aware Prescriptive Recommendations
 
@@ -140,6 +143,15 @@ Account features:
   - Income (primary)
   - Expenses/category (destructive)
 
+## 4.6 Goal Projection Model Finalization
+
+- Locked production model policy to:
+  - `LightGBMRegressor`
+  - `LightGBMClassifier`
+- Runtime now enforces model type checks during artifact load.
+- Goal projection Python runtime is configurable with `ML_PYTHON_BIN` for environments where LightGBM is installed (e.g., Anaconda).
+- Model artifacts are loaded from finalized notebook export locations under `server/ml/models/.../artifacts_goal`.
+
 ---
 
 ## 5. UI/UX and Theming Improvements
@@ -151,6 +163,10 @@ Dark mode issues were audited and fixed:
 - fixed native calendar icon visibility in dark mode
 - fixed date-range calendar popover clipping/overflow in transactions
 - improved text contrast for completed-goal status messaging
+- assistant answer UX improved:
+  - top-level summary bubble remains concise
+  - technical sections (`Savings Forecast`, `Assumptions`, `Important Note`, `Evidence`) are collapsible
+  - duplicate direct-answer panel removed
 
 ---
 
@@ -205,6 +221,7 @@ Status at report time: compile checks passing.
 - Provider-specific native input rendering (date/month controls) can vary by browser.
 - LLM narration can degrade to deterministic style during timeout/fallback.
 - Account email updates can require re-authentication depending on Firebase auth state.
+- Goal projection requires Python environment parity (`lightgbm` installed in `ML_PYTHON_BIN` interpreter).
 
 ---
 
@@ -226,4 +243,3 @@ Status at report time: compile checks passing.
 The project now functions as a robust finance assistant system rather than a static tracker.  
 Core workflows (transactions, goals, insights, assistant, account management) are integrated, explainable, and production-oriented.  
 The implemented foundation supports both capstone demonstration and future feature scaling.
-

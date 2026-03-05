@@ -9,14 +9,19 @@ import numpy as np
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "models"
 
+# LightGBM is the finalized production choice.
+# Place exported artifacts at these paths.
 REG_MODEL_CANDIDATES = [
-    MODEL_DIR / "archive (5)" / "artifacts_goal" / "goal_spend_forecast_model.joblib",
+    MODEL_DIR / "goal_regression_lightgbm.joblib",
+    MODEL_DIR / "archive (5)" / "artifacts_goal" / "goal_regression_lightgbm.joblib",
 ]
 REG_FEATURES_CANDIDATES = [
+    MODEL_DIR / "goal_regression_feature_cols.joblib",
     MODEL_DIR / "archive (5)" / "artifacts_goal" / "goal_feature_cols.joblib",
 ]
 CLS_MODEL_CANDIDATES = [
-    MODEL_DIR / "classification_model.pkl",
+    MODEL_DIR / "goal_classification_lightgbm.pkl",
+    MODEL_DIR / "archive (5)" / "artifacts_goal" / "goal_classification_lightgbm.pkl",
 ]
 
 
@@ -90,6 +95,30 @@ def _cls_value(col_name, features):
     return 0.0
 
 
+def _resolve_feature_columns(model, explicit_cols):
+    if explicit_cols:
+        return list(explicit_cols)
+
+    name_in = getattr(model, "feature_names_in_", None)
+    if name_in is not None and len(name_in) > 0:
+        return list(name_in)
+
+    lgbm_names = getattr(model, "feature_name_", None)
+    if lgbm_names is not None and len(lgbm_names) > 0:
+        return list(lgbm_names)
+
+    return []
+
+
+def _assert_model_type(model, expected_type_name, model_path):
+    actual = type(model).__name__
+    if actual != expected_type_name:
+        raise ValueError(
+            f"Expected {expected_type_name} but loaded {actual} from {model_path}. "
+            "Export the finalized LightGBM artifacts and place them under server/ml/models/."
+        )
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.read() or "{}")
@@ -97,11 +126,20 @@ def main():
 
         reg_model_path = _load_first_existing(REG_MODEL_CANDIDATES)
         reg_feature_cols_path = _load_first_existing(REG_FEATURES_CANDIDATES)
-        if reg_model_path is None or reg_feature_cols_path is None:
-            raise FileNotFoundError("Required regression artifacts are missing.")
+        if reg_model_path is None:
+            raise FileNotFoundError(
+                "LightGBM regression artifact missing. Expected: server/ml/models/goal_regression_lightgbm.joblib"
+            )
 
         reg_model = joblib.load(reg_model_path)
-        reg_cols = joblib.load(reg_feature_cols_path)
+        _assert_model_type(reg_model, "LGBMRegressor", reg_model_path)
+
+        reg_cols = []
+        if reg_feature_cols_path is not None:
+            reg_cols = list(joblib.load(reg_feature_cols_path))
+        reg_cols = _resolve_feature_columns(reg_model, reg_cols)
+        if not reg_cols:
+            raise ValueError("Unable to resolve regression feature columns for LightGBM model.")
 
         reg_row = np.array([[_reg_value(c, features) for c in reg_cols]], dtype=float)
         pred = float(reg_model.predict(reg_row)[0])
@@ -120,15 +158,17 @@ def main():
 
         cls_probability = None
         cls_model_path = _load_first_existing(CLS_MODEL_CANDIDATES)
-        if cls_model_path is not None:
-            try:
-                cls_model = joblib.load(cls_model_path)
-                cls_cols = list(getattr(cls_model, "feature_names_in_", []))
-                if cls_cols:
-                    cls_row = np.array([[_cls_value(c, features) for c in cls_cols]], dtype=float)
-                    cls_probability = float(cls_model.predict_proba(cls_row)[0][1])
-            except Exception:
-                cls_probability = None
+        if cls_model_path is None:
+            raise FileNotFoundError(
+                "LightGBM classification artifact missing. Expected: server/ml/models/goal_classification_lightgbm.pkl"
+            )
+
+        cls_model = joblib.load(cls_model_path)
+        _assert_model_type(cls_model, "LGBMClassifier", cls_model_path)
+        cls_cols = _resolve_feature_columns(cls_model, explicit_cols=[])
+        if cls_cols:
+            cls_row = np.array([[_cls_value(c, features) for c in cls_cols]], dtype=float)
+            cls_probability = float(cls_model.predict_proba(cls_row)[0][1])
 
         out = {
             "predicted_savings": pred,

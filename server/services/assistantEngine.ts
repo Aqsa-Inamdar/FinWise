@@ -74,19 +74,44 @@ const countOverlap = (tokens: string[], vocab: string[]) => {
   return vocab.reduce((acc, item) => acc + (set.has(item) ? 1 : 0), 0);
 };
 
+const hasStrongDescriptiveSignal = (question: string) => {
+  const q = question.toLowerCase();
+  return (
+    /\b(which|what|show)\b.*\bmonth\b.*\b(spend|spending|expense)\b/.test(q) ||
+    /\b(highest|most|max|lowest|least|min)\b.*\b(spend|spending|expense)\b.*\bmonth\b/.test(q) ||
+    /\bhow much\b.*\bspend\b.*\bon\b/.test(q) ||
+    /\b(unusual|anomaly|anomalous|outlier|spike)\b.*\bmonth\b/.test(q) ||
+    /\btop\b.*\b(category|categories)\b/.test(q)
+  );
+};
+
 const detectIntent = (question: string): { intent: AssistantIntent; subIntent: string; confidenceHint: number } => {
   const q = question.toLowerCase();
   const tokens = tokenize(q);
 
   // Hard intent overrides to avoid misrouting clear descriptive prompts.
-  if (/\bwhich month\b.*\b(spend|spending|expense)\b.*\b(most|highest|max)\b|\b(most|highest|max)\b.*\bmonth\b.*\b(spend|spending|expense)\b/.test(q)) {
+  if (
+    /\bwhich month\b.*\b(spend|spending|expense)\b.*\b(most|highest|max)\b|\b(most|highest|max)\b.*\bmonth\b.*\b(spend|spending|expense)\b|\b(most|highest|max)\b.*\b(spend|spending|expense)\b.*\bmonth\b/.test(
+      q,
+    )
+  ) {
     return { intent: "descriptive", subIntent: "max_spend_month", confidenceHint: 0.98 };
   }
-  if (/\bwhich month\b.*\b(spend|spending|expense)\b.*\b(least|lowest|min)\b|\b(least|lowest|min)\b.*\bmonth\b.*\b(spend|spending|expense)\b/.test(q)) {
+  if (
+    /\bwhich month\b.*\b(spend|spending|expense)\b.*\b(least|lowest|min)\b|\b(least|lowest|min)\b.*\bmonth\b.*\b(spend|spending|expense)\b|\b(least|lowest|min)\b.*\b(spend|spending|expense)\b.*\bmonth\b/.test(
+      q,
+    )
+  ) {
     return { intent: "descriptive", subIntent: "min_spend_month", confidenceHint: 0.98 };
   }
   if (/\btop\b.*\b(category|categories)\b|\b(category|categories)\b.*\btop\b/.test(q)) {
     return { intent: "descriptive", subIntent: "top_categories", confidenceHint: 0.95 };
+  }
+  if (/\bhow much\b.*\bspend\b.*\bon\b/.test(q)) {
+    return { intent: "descriptive", subIntent: "category_spend", confidenceHint: 0.95 };
+  }
+  if (/\b(unusual|anomaly|anomalous|outlier|spike)\b.*\bmonth\b|\bwhich month\b.*\b(unusual|anomaly|outlier)\b/.test(q)) {
+    return { intent: "descriptive", subIntent: "unusual_month", confidenceHint: 0.95 };
   }
   if (/\b(how can i|what should i|tips to|ways to)\b.*\b(save|savings|increase savings)\b/.test(q)) {
     return { intent: "prescriptive", subIntent: "savings_improvement", confidenceHint: 0.92 };
@@ -114,6 +139,8 @@ const detectIntent = (question: string): { intent: AssistantIntent; subIntent: s
   const descriptiveRules: Array<{ subIntent: string; keywords: string[] }> = [
     { subIntent: "max_spend_month", keywords: ["most", "highest", "max", "month", "spend"] },
     { subIntent: "min_spend_month", keywords: ["least", "lowest", "min", "month", "spend"] },
+    { subIntent: "category_spend", keywords: ["how", "much", "spend", "on"] },
+    { subIntent: "unusual_month", keywords: ["unusual", "anomaly", "outlier", "spike", "month"] },
     { subIntent: "top_categories", keywords: ["top", "category", "categories", "expense"] },
     { subIntent: "spending_patterns", keywords: ["pattern", "patterns", "trend", "spending"] },
     { subIntent: "monthly_summary", keywords: ["summary", "month", "spending", "income", "expense"] },
@@ -1042,10 +1069,55 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
   const totalIncome = monthly.reduce((s, m) => s + m.income, 0);
   const totalExpense = monthly.reduce((s, m) => s + m.expense, 0);
   const totalSavings = totalIncome - totalExpense;
+  const expenseTxns = txns.filter((t) => t.type === "expense");
+  const categoryMap = new Map<string, number>();
+  expenseTxns.forEach((t) => {
+    const key = (t.category || "Uncategorized").trim();
+    categoryMap.set(key, (categoryMap.get(key) ?? 0) + toAmount(t.amount));
+  });
+  const categoryNames = Array.from(categoryMap.keys());
+
+  const categoryQueryRaw =
+    question.match(/\b(?:spend|spent|spending|expense|expenses)\s+on\s+([a-z0-9&/ -]+?)(?:\s+in\s+this\s+range|\?|$)/i)?.[1]?.trim() ??
+    question.match(/\bon\s+([a-z0-9&/ -]+?)(?:\s+in\s+this\s+range|\?|$)/i)?.[1]?.trim() ??
+    "";
+  const categoryQuery = categoryQueryRaw.toLowerCase();
+  const matchedCategory =
+    categoryNames.find((c) => c.toLowerCase() === categoryQuery) ??
+    categoryNames.find((c) => c.toLowerCase().includes(categoryQuery) || categoryQuery.includes(c.toLowerCase())) ??
+    null;
+  const matchedCategoryAmount = matchedCategory ? categoryMap.get(matchedCategory) ?? 0 : 0;
+
+  let unusualMonthText: string | null = null;
+  if (monthly.length >= 3) {
+    const vals = monthly.map((m) => m.expense);
+    const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+    const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length;
+    const std = Math.sqrt(variance);
+    if (std > 0) {
+      const withZ = monthly.map((m) => ({ ...m, z: (m.expense - mean) / std }));
+      const mostUnusual = [...withZ].sort((a, b) => Math.abs(b.z) - Math.abs(a.z))[0];
+      if (mostUnusual && Math.abs(mostUnusual.z) >= 1) {
+        const direction = mostUnusual.z > 0 ? "higher" : "lower";
+        unusualMonthText = `${mostUnusual.month} was unusual: spending was ${Math.abs(mostUnusual.z).toFixed(2)} standard deviations ${direction} than average.`;
+      } else {
+        unusualMonthText = "No strongly unusual month detected in this range.";
+      }
+    }
+  }
 
   let summary = "I analyzed your selected date range and summarized your spending behavior.";
   if (subIntent === "max_spend_month" && most) summary = `Your highest spending month was ${most.month}.`;
   if (subIntent === "min_spend_month" && least) summary = `Your lowest spending month was ${least.month}.`;
+  if (subIntent === "category_spend" && matchedCategory) {
+    summary = `You spent $${matchedCategoryAmount.toFixed(2)} on ${matchedCategory} in this range.`;
+  }
+  if (subIntent === "category_spend" && !matchedCategory) {
+    summary = "I could not confidently match that category in this range. Please name a category exactly as shown in your data.";
+  }
+  if (subIntent === "unusual_month" && unusualMonthText) {
+    summary = unusualMonthText;
+  }
   if (subIntent === "top_categories" && categories.length) {
     summary = `Your top expense category was ${categories[0].category}.`;
   }
@@ -1341,7 +1413,8 @@ export const answerAssistantQuestion = async (params: {
   if (planner) {
     const planHorizon = planner.horizonMonths ?? parseHorizonMonths(effectiveQuestion);
     const planMetric = planner.metric ?? inferForecastMetric(effectiveQuestion);
-    if (planner.intent === "predictive") {
+    const lockDescriptive = hasStrongDescriptiveSignal(trimmedQuestion);
+    if (planner.intent === "predictive" && !lockDescriptive) {
       effectiveQuestion = `What will my ${planMetric} look like in ${planHorizon} months?`;
       if (planner.scenario) {
         effectiveQuestion = `What if my ${planner.scenario.metric} ${planner.scenario.direction}s by ${planner.scenario.pct}% in ${planHorizon} months?`;
@@ -1364,13 +1437,14 @@ export const answerAssistantQuestion = async (params: {
     }
   }
 
-  const intent = planner
+  const lexicalIntent = detectIntent(effectiveQuestion);
+  const intent = planner && lexicalIntent.confidenceHint < 0.85
     ? {
         intent: planner.intent,
         subIntent: planner.subIntent || "general_descriptive",
         confidenceHint: 0.9,
       }
-    : detectIntent(effectiveQuestion);
+    : lexicalIntent;
   const txns = await fetchTransactionsInRange(userId, startDate, endDate);
 
   if (!txns.length) {
@@ -1459,6 +1533,35 @@ export const answerAssistantQuestion = async (params: {
       },
     ],
   };
+
+  // Safety rail: if intent is still too generic + low confidence, ask clarification
+  // instead of returning a potentially irrelevant answer.
+  if (
+    responseWithConfidence.confidence === "low" &&
+    (responseWithConfidence.subIntent === "general_descriptive" ||
+      responseWithConfidence.subIntent === "general_predictive")
+  ) {
+    return applySimpleDirectAnswer({
+      ...responseWithConfidence,
+      answerSummary:
+        "I can answer this, but I need a bit more specificity to avoid a wrong result.",
+      sections: [
+        {
+          title: "Need Clarification",
+          points: [
+            "Tell me the metric (income, expense, savings, or category).",
+            "Tell me if you want descriptive (past), predictive (future), or prescriptive (what to do).",
+          ],
+        },
+      ],
+      suggestions: [
+        "How much did I spend on Groceries in this range?",
+        "Which month had my highest spending in this range?",
+        "What will my savings look like in 6 months?",
+        "How can I increase my savings to hit my goal?",
+      ],
+    });
+  }
 
   const narrated = await narrateWithLlm(responseWithConfidence, effectiveQuestion);
   const suggestionCandidates = dedupeSuggestions([

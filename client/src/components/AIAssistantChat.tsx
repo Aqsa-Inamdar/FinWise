@@ -255,6 +255,10 @@ export function AIAssistantChat() {
 
   const renderAssistantPayload = (payload?: AssistantResponse | null) => {
     if (!payload) return null;
+    const otherSections = payload.sections.filter(
+      (section) => section.title.toLowerCase() !== "direct answer",
+    );
+
     return (
       <div className="mt-2 rounded border bg-background p-3 text-sm space-y-3">
         <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -263,26 +267,50 @@ export function AIAssistantChat() {
           <span className={confidenceColor(payload.confidence)}>Confidence: {payload.confidence}</span>
         </div>
 
-        {payload.sections.map((section, idx) => (
-          <div key={`${section.title}-${idx}`} className="space-y-1">
-            <p className="font-medium">{section.title}</p>
-            {section.points.map((point, pIdx) => (
-              <p key={`${section.title}-${pIdx}`} className="text-muted-foreground">- {point}</p>
-            ))}
-          </div>
+        {otherSections.map((section, idx) => (
+          <details key={`${section.title}-${idx}`} className="rounded-md border border-border/60 bg-muted/10 px-3 py-2">
+            <summary className="cursor-pointer select-none font-medium">
+              {section.title}
+            </summary>
+            <div className="mt-2 space-y-1">
+              {section.points.map((point, pIdx) => (
+                <p key={`${section.title}-${pIdx}`} className="text-muted-foreground">
+                  - {point}
+                </p>
+              ))}
+            </div>
+          </details>
         ))}
 
         {payload.evidence.length > 0 && (
-          <div className="space-y-1">
-            <p className="font-medium">Evidence</p>
-            {payload.evidence.map((item, idx) => (
-              <p key={`${item.label}-${idx}`} className="text-muted-foreground">
-                {item.label}: {item.value}
-              </p>
-            ))}
-          </div>
+          <details className="rounded-md border border-border/60 bg-muted/10 px-3 py-2">
+            <summary className="cursor-pointer select-none font-medium">Evidence</summary>
+            <div className="mt-2 space-y-1">
+              {payload.evidence.map((item, idx) => (
+                <p key={`${item.label}-${idx}`} className="text-muted-foreground">
+                  {item.label}: {item.value}
+                </p>
+              ))}
+            </div>
+          </details>
         )}
 
+        {payload.suggestions.length > 0 && (
+          <details className="rounded-md border border-border/60 bg-muted/10 px-3 py-2">
+            <summary className="cursor-pointer select-none font-medium">Suggested next questions</summary>
+            <div className="mt-2 space-y-1">
+              {payload.suggestions.slice(0, 5).map((item, idx) => (
+                <p key={`suggestion-${idx}`} className="text-muted-foreground">
+                  - {item}
+                </p>
+              ))}
+            </div>
+          </details>
+        )}
+
+        <div className="text-[11px] text-muted-foreground">
+          Tap each section to expand details.
+        </div>
       </div>
     );
   };

@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PREDICT_SCRIPT = path.join(__dirname, "..", "ml", "predict_goal_projection.py");
+const ML_PYTHON_BIN = process.env.ML_PYTHON_BIN || "python3";
 
 export type GoalDoc = {
   id: string;
@@ -87,13 +88,13 @@ const computeMonthsUntil = (from: Date, to: Date) => {
 const sigmoid = (value: number) => 1 / (1 + Math.exp(-value));
 
 const FINAL_MODEL_CONFIG = Object.freeze({
-  regressionModel: "LinearRegression",
-  classificationModel: "RandomForestClassifier",
+  regressionModel: "LightGBMRegressor",
+  classificationModel: "LightGBMClassifier",
   thresholdPolicy: "balanced",
   threshold: 0.41,
   trainedRows: 20126,
   notes:
-    "Production artifacts loaded from server/ml/models with deadline contract and explainability enabled.",
+    "Production artifacts are locked to LightGBMRegressor and LightGBMClassifier with deadline contract and explainability enabled.",
 });
 
 const buildFeaturesFromHistory = (history: MonthlySummary[]) => {
@@ -144,7 +145,7 @@ const buildFeaturesFromHistory = (history: MonthlySummary[]) => {
 const runPrediction = async (features: Record<string, number>) => {
   const payload = JSON.stringify({ features });
   const stdout = await new Promise<string>((resolve, reject) => {
-    const child = spawn("python3", [PREDICT_SCRIPT], {
+    const child = spawn(ML_PYTHON_BIN, [PREDICT_SCRIPT], {
       stdio: ["pipe", "pipe", "pipe"],
     });
 

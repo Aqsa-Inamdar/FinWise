@@ -58,32 +58,47 @@ The goal modeling notebooks and artifacts in `server/ml/models/archive (5)` were
 `server/ml/predict_goal_projection.py` loads:
 
 - Regression model:
-  - `server/ml/models/archive (5)/artifacts_goal/goal_spend_forecast_model.joblib`
-  - **Model type**: `LinearRegression` (verified from artifact load)
+  - `server/ml/models/goal_regression_lightgbm.joblib` (preferred)
+  - or `server/ml/models/archive (5)/artifacts_goal/goal_regression_lightgbm.joblib`
+  - **Model type**: `LGBMRegressor` (enforced by runtime type checks)
 - Regression feature columns:
-  - `server/ml/models/archive (5)/artifacts_goal/goal_feature_cols.joblib`
+  - `server/ml/models/goal_regression_feature_cols.joblib` (preferred)
+  - or `server/ml/models/archive (5)/artifacts_goal/goal_feature_cols.joblib`
 - Classification model:
-  - `server/ml/models/classification_model.pkl`
-  - **Model type**: `RandomForestClassifier`
+  - `server/ml/models/goal_classification_lightgbm.pkl` (preferred)
+  - or `server/ml/models/archive (5)/artifacts_goal/goal_classification_lightgbm.pkl`
+  - **Model type**: `LGBMClassifier` (enforced by runtime type checks)
+
+`server/services/goalProjection.ts` declares final production config as:
+
+- `LightGBMRegressor`
+- `LightGBMClassifier`
+- threshold policy: `balanced`
+- threshold: `0.41`
+
+Note on runtime environment:
+
+- Model loading requires a Python environment with `lightgbm` installed.
+- Backend uses `ML_PYTHON_BIN` (from `.env`) to select the interpreter.
+- Example: `ML_PYTHON_BIN=/opt/anaconda3/bin/python`
 
 ## 3.2 Why These Algorithms
 
-### Linear Regression (monthly savings forecast)
+### LightGBM Regressor (monthly savings forecast)
 
 Used for `predicted_savings` because:
 
-- fast inference and low operational complexity
-- interpretable behavior for goal planning
-- stable with engineered rolling features
-- easy fallback behavior when feature spaces shift
+- strong non-linear fit on engineered financial time-window features
+- robust performance in notebook model comparison/CV
+- good bias/variance tradeoff for this tabular feature set
 
-### Random Forest Classifier (deadline achievability probability)
+### LightGBM Classifier (deadline achievability probability)
 
 Used for `P(achievable_by_deadline)` because:
 
-- handles non-linear interactions in goal/feature space
-- robust to mixed feature distributions
-- provides probability via `predict_proba` for threshold policy
+- strong precision/recall/F1/AUC performance in offline evaluation
+- calibrated probability output via `predict_proba`
+- efficient inference for per-goal API calls
 
 ## 3.3 Feature Engineering (Goal Projection)
 
@@ -139,6 +154,7 @@ It uses a planner/executor/narrator architecture:
   - clarification-needed flag
 
 If ambiguous, assistant returns clarification question instead of low-quality output.
+Deterministic lexical guardrails are applied before planner output is accepted for high-signal prompts.
 
 ## 4.2 Step B: Deterministic Executor
 
@@ -148,12 +164,24 @@ Backend executes plan using deterministic code and models:
 - predictive projections (including goal projection model)
 - prescriptive simulations (category-reduction scenarios)
 
+New routing safeguards:
+
+- high-signal descriptive prompts (e.g., "highest spending month", "how much spend on X", "unusual month")
+  are protected from being rewritten into predictive forecasts.
+- low-confidence generic intents trigger clarification instead of potentially wrong answers.
+
 This ensures numeric correctness and auditability.
 
 ## 4.3 Step C: Narrator (LLM)
 
 Computed JSON output is passed to `gpt-5-mini` for plain-language narration.
 If narration fails (timeout/schema failure), deterministic response is returned.
+
+UI rendering policy for assistant responses:
+
+- summary bubble at top for quick read
+- detailed sections shown in collapsible panels (`<details>`) below
+- duplicate direct-answer block removed to reduce repetition
 
 ## 4.4 Context Awareness
 
@@ -317,6 +345,7 @@ Assistant queries also store intent/sub-intent/confidence metadata for QA and it
 - Add E2E tests for assistant routing + goal-gap scenarios
 - Improve mobile calendar responsiveness (1-month picker on small screens)
 - Add model registry/version metadata surfaced in admin diagnostics
+- Add startup health-check endpoint for ML artifacts + Python dependency verification (`lightgbm`, file presence)
 
 ---
 
@@ -329,4 +358,3 @@ The web app uses a practical hybrid architecture:
 - privacy-aware payload minimization/redaction
 
 This design keeps outputs explainable, actionable, and production-friendly while preserving flexibility for richer assistant behavior.
-
