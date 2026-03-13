@@ -382,8 +382,11 @@ const narrateWithLlm = async (
         {
           role: "system",
           content:
-            "You are a financial explainer. Rewrite the provided deterministic result into plain language. " +
-            "Do not invent numbers, assumptions, or metrics. Use only values present in the input JSON.",
+            "You are a financial explainer for people with low financial literacy. Rewrite the provided deterministic result into clear, warm, everyday language. " +
+            "Start with a more detailed direct answer that explains what happened, why it matters, and what the user should take away in 2 to 4 short sentences. " +
+            "Avoid jargon where possible. If a technical term appears in the input, translate it into simple language instead of repeating it literally. " +
+            "Do not invent numbers, assumptions, or metrics. Use only values present in the input JSON. " +
+            "Keep sections factual, but make the first answer easy to understand without financial background.",
         },
         {
           role: "user",
@@ -1099,7 +1102,8 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
       const mostUnusual = [...withZ].sort((a, b) => Math.abs(b.z) - Math.abs(a.z))[0];
       if (mostUnusual && Math.abs(mostUnusual.z) >= 1) {
         const direction = mostUnusual.z > 0 ? "higher" : "lower";
-        unusualMonthText = `${mostUnusual.month} was unusual: spending was ${Math.abs(mostUnusual.z).toFixed(2)} standard deviations ${direction} than average.`;
+        const difference = Math.abs(mostUnusual.expense - mean);
+        unusualMonthText = `${mostUnusual.month} stands out because you spent about $${difference.toFixed(2)} ${direction} than your usual monthly spending.`;
       } else {
         unusualMonthText = "No strongly unusual month detected in this range.";
       }

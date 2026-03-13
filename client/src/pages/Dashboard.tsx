@@ -33,18 +33,44 @@ export default function Dashboard() {
       categoryMap.set(expense.category, current + Number(expense.amount));
     });
 
-  const chartColors = [
-    "hsl(var(--chart-1))",
-    "hsl(var(--chart-2))",
-    "hsl(var(--chart-3))",
-    "hsl(var(--chart-4))",
-    "hsl(var(--chart-5))",
+  const categoryColorMap: Record<string, string> = {
+    "Rent": "#2563eb",
+    "Rent/Housing": "#2563eb",
+    "EMI/Loan": "#1d4ed8",
+    "Groceries": "#10b981",
+    "Transport": "#f59e0b",
+    "Dining": "#ef4444",
+    "Shopping": "#8b5cf6",
+    "Subscriptions": "#ec4899",
+    "Entertainment": "#f97316",
+    "Utilities": "#06b6d4",
+    "Internet": "#14b8a6",
+    "Phone": "#84cc16",
+    "Healthcare": "#dc2626",
+    "General": "#64748b",
+    "Uncategorized": "#94a3b8",
+    "Income": "#22c55e",
+  };
+
+  const fallbackChartColors = [
+    "#2563eb",
+    "#10b981",
+    "#f59e0b",
+    "#ef4444",
+    "#8b5cf6",
+    "#06b6d4",
+    "#ec4899",
+    "#f97316",
+    "#14b8a6",
+    "#84cc16",
+    "#dc2626",
+    "#64748b",
   ];
 
   const expenseData = Array.from(categoryMap.entries()).map(([category, amount], index) => ({
     category,
     amount,
-    color: chartColors[index % chartColors.length],
+    color: categoryColorMap[category] ?? fallbackChartColors[index % fallbackChartColors.length],
   }));
 
   const allDates = transactions
