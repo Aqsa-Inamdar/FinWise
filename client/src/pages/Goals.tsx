@@ -5,6 +5,7 @@ import { AddGoalDialog } from "@/components/AddGoalDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -46,11 +47,20 @@ const resolveGoalStatus = (goal: GoalResponse, allocatedAmount: number): "comple
   const target = Math.max(0, Number(goal.targetAmount) || 0);
   if (allocatedAmount >= target && target > 0) return "completed";
 
+  const deadlineTs = new Date(goal.deadline).getTime();
+  const projectedCompletionRaw = goal.projection?.contract?.predictedCompletionDate ?? goal.projection?.projectedCompletionDate;
+  const projectedCompletionTs = projectedCompletionRaw ? new Date(projectedCompletionRaw).getTime() : NaN;
+
+  if (Number.isFinite(deadlineTs) && Number.isFinite(projectedCompletionTs)) {
+    if (projectedCompletionTs <= deadlineTs) return "on-track";
+    const daysLeft = Math.ceil((deadlineTs - Date.now()) / (1000 * 60 * 60 * 24));
+    if (daysLeft >= 0 && daysLeft <= NEAR_DEADLINE_DAYS) return "approaching";
+    return "difficult";
+  }
+
   const achievable = goal.projection?.contract?.achievableByDeadline;
   if (achievable === true) return "on-track";
-  if (achievable === false) return "difficult";
 
-  const deadlineTs = new Date(goal.deadline).getTime();
   if (Number.isFinite(deadlineTs)) {
     const daysLeft = Math.ceil((deadlineTs - Date.now()) / (1000 * 60 * 60 * 24));
     if (daysLeft >= 0 && daysLeft <= NEAR_DEADLINE_DAYS) {
@@ -61,7 +71,7 @@ const resolveGoalStatus = (goal: GoalResponse, allocatedAmount: number): "comple
   const status = goal.projection?.status;
   if (status === "on_track") return "on-track";
   if (status === "at_risk") return "approaching";
-  return "difficult";
+  return achievable === false ? "difficult" : "difficult";
 };
 
 export default function Goals() {
@@ -167,14 +177,21 @@ export default function Goals() {
       </div>
 
       <div className="grid auto-rows-min items-start gap-4 md:grid-cols-2">
-        {isLoading && <p className="text-sm text-muted-foreground">Loading goals...</p>}
+        {isLoading && (
+          <div className="rounded-lg border border-border/70 bg-card p-4 text-sm text-muted-foreground" role="status" aria-live="polite">
+            Loading goals and deadline projections.
+          </div>
+        )}
         {error && (
-          <p className="text-sm text-red-600">Unable to load goals. Please refresh and try again.</p>
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-foreground" role="alert">
+            We could not load your goals right now. Refresh the page and try again.
+          </div>
         )}
         {!isLoading && !error && goals.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No goals yet. Use Add Goal to start tracking.
-          </p>
+          <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 p-6 text-sm">
+            <p className="font-medium text-foreground">No goals yet</p>
+            <p className="mt-1 text-muted-foreground">Add a goal to start tracking how your savings align with upcoming deadlines.</p>
+          </div>
         )}
         {!isLoading &&
           !error &&
@@ -219,12 +236,13 @@ export default function Goals() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Goal name</p>
-              <Input value={formName} onChange={(e) => setFormName(e.target.value)} />
+              <Label htmlFor="edit-goal-name" className="text-xs text-muted-foreground">Goal name</Label>
+              <Input id="edit-goal-name" value={formName} onChange={(e) => setFormName(e.target.value)} />
             </div>
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Target amount</p>
+              <Label htmlFor="edit-goal-target" className="text-xs text-muted-foreground">Target amount</Label>
               <Input
+                id="edit-goal-target"
                 type="number"
                 min="0"
                 step="0.01"
@@ -233,12 +251,13 @@ export default function Goals() {
               />
             </div>
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Deadline</p>
-              <Input type="date" value={formDeadline} onChange={(e) => setFormDeadline(e.target.value)} />
+              <Label htmlFor="edit-goal-deadline" className="text-xs text-muted-foreground">Deadline</Label>
+              <Input id="edit-goal-deadline" type="date" value={formDeadline} onChange={(e) => setFormDeadline(e.target.value)} />
             </div>
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Savings allocated to this goal (optional override)</p>
+              <Label htmlFor="edit-goal-allocation" className="text-xs text-muted-foreground">Savings allocated to this goal (optional override)</Label>
               <Input
+                id="edit-goal-allocation"
                 type="number"
                 min="0"
                 step="0.01"

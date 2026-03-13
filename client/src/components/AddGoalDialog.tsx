@@ -19,6 +19,7 @@ import {
   FormField,
   FormItem,
   FormLabel,
+  FormDescription,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,10 @@ const addGoalSchema = z.object({
     .refine((v) => Number(v) > 0, "Target amount must be positive"),
   deadline: z.string().min(1, "Deadline is required"),
   category: z.string().optional(),
+  allocationOverride: z
+    .string()
+    .optional()
+    .refine((v) => !v || Number(v) >= 0, "Allocated amount must be zero or positive"),
 });
 
 type AddGoalValues = z.infer<typeof addGoalSchema>;
@@ -42,6 +47,7 @@ const defaultValues: AddGoalValues = {
   targetAmount: "",
   deadline: "",
   category: "",
+  allocationOverride: "",
 };
 
 export function AddGoalDialog() {
@@ -62,6 +68,10 @@ export function AddGoalDialog() {
         currentAmount: 0,
         deadline: values.deadline,
         category: values.category?.trim() || null,
+        allocationOverride:
+          values.allocationOverride?.trim()
+            ? Number(values.allocationOverride)
+            : null,
       };
       const res = await apiRequest("POST", "/api/goals", payload);
       return res.json();
@@ -116,11 +126,12 @@ export function AddGoalDialog() {
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Goal name</FormLabel>
+                  <FormLabel htmlFor="goal-name">Goal name</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Emergency Fund" {...field} />
+                    <Input id="goal-name" placeholder="e.g., Emergency Fund" aria-describedby="goal-name-help" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormDescription id="goal-name-help">Use a short, specific name so this goal is easy to identify later.</FormDescription>
+                  <FormMessage role="alert" />
                 </FormItem>
               )}
             />
@@ -130,11 +141,12 @@ export function AddGoalDialog() {
               name="targetAmount"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Target amount</FormLabel>
+                  <FormLabel htmlFor="goal-target">Target amount</FormLabel>
                   <FormControl>
-                    <Input type="number" step="0.01" min="0" placeholder="10000" {...field} />
+                    <Input id="goal-target" type="number" step="0.01" min="0" placeholder="10000" aria-describedby="goal-target-help" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormDescription id="goal-target-help">Enter the full dollar amount you want to reach for this goal.</FormDescription>
+                  <FormMessage role="alert" />
                 </FormItem>
               )}
             />
@@ -144,11 +156,12 @@ export function AddGoalDialog() {
               name="deadline"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Deadline</FormLabel>
+                  <FormLabel htmlFor="goal-deadline">Deadline</FormLabel>
                   <FormControl>
-                    <Input type="date" {...field} />
+                    <Input id="goal-deadline" type="date" aria-describedby="goal-deadline-help" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormDescription id="goal-deadline-help">Pick the date by which you want to complete this goal.</FormDescription>
+                  <FormMessage role="alert" />
                 </FormItem>
               )}
             />
@@ -158,11 +171,37 @@ export function AddGoalDialog() {
               name="category"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Category (optional)</FormLabel>
+                  <FormLabel htmlFor="goal-category">Category (optional)</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Travel, Home, Education" {...field} />
+                    <Input id="goal-category" placeholder="e.g., Travel, Home, Education" aria-describedby="goal-category-help" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormDescription id="goal-category-help">This helps group similar goals, but you can leave it blank.</FormDescription>
+                  <FormMessage role="alert" />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="allocationOverride"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel htmlFor="goal-allocation">Savings allocated to this goal (optional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      id="goal-allocation"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Leave empty for automatic allocation"
+                      aria-describedby="goal-allocation-help"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormDescription id="goal-allocation-help">
+                    If left blank, the app will allocate savings automatically by deadline priority.
+                  </FormDescription>
+                  <FormMessage role="alert" />
                 </FormItem>
               )}
             />

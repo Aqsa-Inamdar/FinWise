@@ -34,13 +34,14 @@ export function StatCard({ title, value, trend, icon, testId }: StatCardProps) {
                 trend.isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
               )}
               data-testid={`${testId}-trend`}
+              aria-label={`${trend.isPositive ? "Positive" : "Negative"} change of ${Math.abs(trend.value)} percent`}
             >
               {trend.isPositive ? (
-                <ArrowUpRight className="h-4 w-4" />
+                <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
               ) : (
-                <ArrowDownRight className="h-4 w-4" />
+                <ArrowDownRight className="h-4 w-4" aria-hidden="true" />
               )}
-              {Math.abs(trend.value)}%
+              <span>{trend.isPositive ? "Up" : "Down"} {Math.abs(trend.value)}%</span>
             </div>
           )}
         </div>

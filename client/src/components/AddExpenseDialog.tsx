@@ -35,14 +35,16 @@ import { getAuthHeader, queryClient } from "@/lib/queryClient";
 import Tesseract from "tesseract.js";
 
 const categoryKeywords: Record<string, string[]> = {
-  rent: ["rent", "mortgage", "lease", "apartment", "housing"],
-  food: ["restaurant", "cafe", "coffee", "food", "grocer", "dining", "meal", "bakery"],
-  transportation: ["uber", "lyft", "taxi", "gas", "transport", "bus", "train", "flight", "cab"],
-  entertainment: ["movie", "cinema", "concert", "ticket", "game", "entertainment"],
-  utilities: ["utility", "electric", "water", "internet", "wifi", "power", "gas bill"],
-  healthcare: ["clinic", "pharmacy", "doctor", "hospital", "medical", "dentist"],
-  shopping: ["store", "market", "shop", "retail", "mall", "purchase"],
-  emi_loan: ["emi", "loan", "mortgage payment", "installment"],
+  "Rent/Housing": ["rent", "mortgage", "lease", "apartment", "housing"],
+  Groceries: ["restaurant", "cafe", "coffee", "food", "grocer", "meal", "bakery", "grocery"],
+  Transport: ["uber", "lyft", "taxi", "gas", "transport", "bus", "train", "flight", "cab"],
+  Entertainment: ["movie", "cinema", "concert", "ticket", "game", "entertainment"],
+  Utilities: ["utility", "electric", "water", "power", "gas bill"],
+  Internet: ["internet", "wifi", "broadband", "comcast"],
+  Phone: ["phone", "wireless", "mobile", "cell"],
+  Shopping: ["store", "market", "shop", "retail", "mall", "purchase"],
+  "EMI/Loan": ["emi", "loan", "mortgage payment", "installment"],
+  Healthcare: ["clinic", "pharmacy", "doctor", "hospital", "medical", "dentist"],
 };
 
 const toIsoDate = (value: Date) => {
@@ -223,18 +225,18 @@ const parseReceiptDetails = (text: string) => {
 
 // Expense categories
 const expenseCategories = [
-  { value: "rent", label: "Rent/Housing" },
-  { value: "food", label: "Food/Groceries" },
-  { value: "transportation", label: "Transportation" },
-  { value: "entertainment", label: "Entertainment" },
-  { value: "utilities", label: "Utilities" },
-  { value: "internet", label: "Internet" },
-  { value: "phone", label: "Phone" },
-  { value: "shopping", label: "Shopping" },
-  { value: "subscriptions", label: "Subscriptions" },
-  { value: "emi_loan", label: "EMI/Loan" },
-  { value: "healthcare", label: "Healthcare" },
-  { value: "other", label: "Other" },
+  { value: "Rent/Housing", label: "Rent/Housing" },
+  { value: "Groceries", label: "Groceries" },
+  { value: "Transport", label: "Transport" },
+  { value: "Entertainment", label: "Entertainment" },
+  { value: "Utilities", label: "Utilities" },
+  { value: "Internet", label: "Internet" },
+  { value: "Phone", label: "Phone" },
+  { value: "Shopping", label: "Shopping" },
+  { value: "Subscriptions", label: "Subscriptions" },
+  { value: "EMI/Loan", label: "EMI/Loan" },
+  { value: "Healthcare", label: "Healthcare" },
+  { value: "General", label: "General" },
 ];
 
 // Schema (OCR-ready)

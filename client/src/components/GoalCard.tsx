@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { AlertTriangle, CheckCircle2, Clock3, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -47,11 +48,12 @@ export function GoalCard({
   const progressId = useId();
 
   const statusConfig = {
-    completed: { label: "Completed", className: "bg-emerald-600" },
-    "on-track": { label: "On Track", className: "bg-green-500" },
-    approaching: { label: "Approaching Deadline", className: "bg-amber-500" },
-    difficult: { label: "Difficult", className: "bg-red-600" },
+    completed: { label: "Completed", className: "bg-emerald-600", icon: CheckCircle2 },
+    "on-track": { label: "On Track", className: "bg-green-600", icon: TrendingUp },
+    approaching: { label: "Approaching Deadline", className: "bg-amber-600 text-black dark:text-black", icon: Clock3 },
+    difficult: { label: "Difficult", className: "bg-red-700", icon: AlertTriangle },
   };
+  const StatusIcon = statusConfig[status].icon;
 
   return (
     <Card
@@ -68,9 +70,10 @@ export function GoalCard({
         <Badge
           id={statusId}
           variant="secondary"
-          className={cn("text-xs text-white", statusConfig[status].className)}
+          className={cn("inline-flex items-center gap-1 text-xs text-white", statusConfig[status].className)}
         >
-          {statusConfig[status].label}
+          <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>Status: {statusConfig[status].label}</span>
         </Badge>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -109,11 +112,6 @@ export function GoalCard({
         {isCompleted && (
           <p className="text-xs text-emerald-700 dark:text-emerald-400" data-testid={`${testId}-completed-note`}>
             Goal achieved. No further prediction is needed.
-          </p>
-        )}
-        {!isCompleted && typeof probabilityAchievableByDeadline === "number" && (
-          <p className="text-xs text-muted-foreground" data-testid={`${testId}-probability`}>
-            Achievability probability: {(probabilityAchievableByDeadline * 100).toFixed(1)}%
           </p>
         )}
         {!isCompleted && projectedCompletionDate && (

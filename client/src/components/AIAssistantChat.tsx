@@ -332,17 +332,18 @@ export function AIAssistantChat() {
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[280px_1fr]">
-      <Card className="flex min-h-0 flex-col p-3">
+      <Card className="flex min-h-0 flex-col p-3" role="region" aria-labelledby="assistant-chat-history-heading">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">Chats</p>
+          <p id="assistant-chat-history-heading" className="text-sm font-medium">Chats</p>
           <Button size="sm" onClick={createNewChat}>New Chat</Button>
         </div>
-        <div className="mt-3 flex-1 space-y-2 overflow-y-auto">
+        <div className="mt-3 flex-1 space-y-2 overflow-y-auto" role="list" aria-label="Chat history">
           {chats.map((chat) => (
-            <div key={chat.id} className="rounded border p-2">
+            <div key={chat.id} className="rounded border p-2" role="listitem">
               <button
-                className={`w-full text-left text-sm ${activeChatId === chat.id ? "font-semibold" : ""}`}
+                className={`w-full rounded-sm text-left text-sm ${activeChatId === chat.id ? "font-semibold" : ""}`}
                 onClick={() => setActiveChatId(chat.id)}
+                aria-current={activeChatId === chat.id ? "true" : undefined}
               >
                 {chat.title || "Untitled"}
               </button>
@@ -375,25 +376,26 @@ export function AIAssistantChat() {
               </div>
             </div>
           ))}
-          {!chats.length && <p className="text-xs text-muted-foreground">No chat history yet.</p>}
+          {!chats.length && <p className="text-xs text-muted-foreground">No chat history yet. Start a new chat to ask a financial question.</p>}
         </div>
       </Card>
 
-      <Card className="flex h-full min-h-0 flex-col">
+      <Card className="flex h-full min-h-0 flex-col" role="region" aria-labelledby="assistant-thread-heading">
         <div className="border-b p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="font-medium">{activeChatTitle}</p>
+            <p id="assistant-thread-heading" className="font-medium">{activeChatTitle}</p>
             <div className="flex flex-wrap gap-2 items-center">
               {llmEnabled != null && (
                 <span className="text-xs text-muted-foreground">
                   Narration: {llmEnabled ? "LLM enabled" : "rules only"}
                 </span>
               )}
-              <label className="text-xs text-muted-foreground">Start</label>
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[160px]" />
-              <label className="text-xs text-muted-foreground">End</label>
-              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-[160px]" />
+              <label htmlFor="assistant-start-date" className="text-xs text-muted-foreground">Start</label>
+              <Input id="assistant-start-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[160px]" />
+              <label htmlFor="assistant-end-date" className="text-xs text-muted-foreground">End</label>
+              <Input id="assistant-end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-[160px]" />
               <select
+                aria-label="Selected goal"
                 value={selectedGoalId}
                 onChange={(e) => setSelectedGoalId(e.target.value)}
                 className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -408,10 +410,10 @@ export function AIAssistantChat() {
 
         </div>
 
-        <section className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4" role="log" aria-live="polite">
+        <section className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4" role="log" aria-live="polite" aria-label="Assistant conversation">
           {messages.length === 0 && (
-            <div className="text-sm text-muted-foreground">
-              Ask a question to get a structured financial report.
+            <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
+              Ask a financial question to get a structured answer, evidence, and next-step suggestions.
             </div>
           )}
           {messages.map((message) => (
@@ -428,6 +430,7 @@ export function AIAssistantChat() {
 
         <form
           className="border-t p-4"
+          aria-label="Ask the assistant a financial question"
           onSubmit={(event) => {
             event.preventDefault();
             askQuestion(question);
@@ -457,6 +460,7 @@ export function AIAssistantChat() {
               placeholder="Ask a financial question for this date range..."
               className="flex-1"
               data-testid="input-chat"
+              aria-label="Financial question"
             />
             <Button type="submit" disabled={!question.trim() || isSubmitting} data-testid="button-send">
               {isSubmitting ? "Analyzing..." : "Send"}

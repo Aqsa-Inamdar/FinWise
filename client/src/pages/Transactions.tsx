@@ -4,8 +4,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useFirestoreTransactions } from "@/hooks/useFirestoreTransactions";
 import { getAuthHeader } from "@/lib/queryClient";
 import { useAuth } from "@/contexts/AuthProvider";
-import { db } from "@/lib/firebase";
-import { doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { DateRange } from "react-day-picker";
 import { format, endOfDay, startOfDay } from "date-fns";
 import { CalendarIcon, ArrowUpDown, UploadCloud, Trash2 } from "lucide-react";
@@ -110,6 +108,7 @@ const pageSize = 10;
 const categoryOptionsBase = [
   "Income",
   "Rent",
+  "Rent/Housing",
   "Utilities",
   "Internet",
   "Phone",
@@ -118,6 +117,8 @@ const categoryOptionsBase = [
   "Dining",
   "Shopping",
   "Subscriptions",
+  "Entertainment",
+  "Healthcare",
   "EMI/Loan",
   "General",
   "Uncategorized",
@@ -125,6 +126,7 @@ const categoryOptionsBase = [
 
 
 export default function Transactions() {
+  const { toast } = useToast();
   const queryClient = useQueryClient();
   const { transactions, loading: firestoreLoading, error } = useFirestoreTransactions();
   const { user } = useAuth();
@@ -239,29 +241,92 @@ export default function Transactions() {
   };
 
   const updateDraft = (id: string, patch: Partial<TransactionDraft>) => {
-    setDrafts((prev) => ({
-      ...prev,
-      [id]: { ...(prev[id] ?? {}), ...patch },
-    }));
+    setDrafts((prev) => {
+      const txn = transactions.find((item) => item.id === id);
+      const base = prev[id] ?? (txn
+        ? {
+            date: txn.date.slice(0, 10),
+            description: txn.description,
+            category: txn.category,
+            amount: String(txn.amount),
+            type: txn.type,
+          }
+        : {
+            date: "",
+            description: "",
+            category: "General",
+            amount: "",
+            type: "expense" as const,
+          });
+      return {
+        ...prev,
+        [id]: { ...base, ...patch },
+      };
+    });
   };
 
   const persistDraft = async (id: string) => {
-    if (!user) return;
-    const draft = drafts[id];
+    const txn = transactions.find((item) => item.id === id);
+    const draft = drafts[id] ?? (txn
+      ? {
+          date: txn.date.slice(0, 10),
+          description: txn.description,
+          category: txn.category,
+          amount: String(txn.amount),
+          type: txn.type,
+        }
+      : null);
     if (!draft) return;
     const payload = {
-      date: new Date(`${draft.date}T12:00:00.000Z`).toISOString(),
-      description: draft.description.trim(),
-      category: draft.category.trim() || "General",
+      date: draft.date,
+      description: (draft.description ?? "").trim(),
+      category: (draft.category ?? "General").trim() || "General",
       amount: Number(draft.amount),
       type: draft.type,
     };
-    await updateDoc(doc(db, "users", user.uid, "transactions", id), payload);
+
+    try {
+      const authHeader = await getAuthHeader();
+      const response = await fetch(`/api/transactions/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeader,
+        },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Failed to update transaction");
+      }
+    } catch (err: any) {
+      toast({
+        title: "Failed to update transaction",
+        description: err?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleDelete = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "transactions", id));
+    try {
+      const authHeader = await getAuthHeader();
+      const response = await fetch(`/api/transactions/${id}`, {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Failed to delete transaction");
+      }
+      toast({ title: "Transaction deleted" });
+    } catch (err: any) {
+      toast({
+        title: "Failed to delete transaction",
+        description: err?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const loading = firestoreLoading;
@@ -531,7 +596,10 @@ export default function Transactions() {
                       <TableCell>
                         <Select
                           value={draft.type}
-                          onValueChange={(value) => updateDraft(txn.id, { type: value as "income" | "expense" })}
+                          onValueChange={(value) => {
+                            updateDraft(txn.id, { type: value as "income" | "expense" });
+                            void persistDraft(txn.id);
+                          }}
                         >
                           <SelectTrigger
                             id={`${draftId}-type`}
@@ -708,10 +776,32 @@ function StatementImportDialog({ onImportComplete }: { onImportComplete: () => v
     setIsSaving(true);
     setError(null);
     try {
-      // Assume transactions are already written to Firestore by backend after PDF parse
+      const authHeader = await getAuthHeader();
+      const response = await fetch("/api/transactions/import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeader,
+        },
+        body: JSON.stringify({
+          transactions: drafts.map((draft) => ({
+            date: draft.date,
+            description: draft.description,
+            category: draft.category || "General",
+            amount: Number(draft.amount),
+            type: draft.type,
+          })),
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Failed to import transactions");
+      }
+
       toast({
         title: "Transactions imported",
-        description: `${drafts.length} transaction${drafts.length === 1 ? "" : "s"} saved to Firestore!`,
+        description: `${result?.imported ?? drafts.length} transaction${drafts.length === 1 ? "" : "s"} saved to Firestore!`,
       });
       resetState();
       setOpen(false);
@@ -739,7 +829,7 @@ function StatementImportDialog({ onImportComplete }: { onImportComplete: () => v
           Upload PDF
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>Import statement</DialogTitle>
           <DialogDescription>
@@ -747,7 +837,7 @@ function StatementImportDialog({ onImportComplete }: { onImportComplete: () => v
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto pr-1 flex-1">
           <div>
             <label htmlFor="statement-upload" className="text-sm font-medium">
               Statement PDF
@@ -773,7 +863,7 @@ function StatementImportDialog({ onImportComplete }: { onImportComplete: () => v
 
           {drafts.length > 0 && (
             <div className="rounded-md border">
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[50vh]">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -845,7 +935,7 @@ function StatementImportDialog({ onImportComplete }: { onImportComplete: () => v
           )}
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 border-t bg-background pt-4 sticky bottom-0">
           <Button type="button" variant="outline" onClick={resetState} disabled={isParsing || isSaving}>
             Clear
           </Button>

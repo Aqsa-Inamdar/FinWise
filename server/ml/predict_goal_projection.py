@@ -70,8 +70,19 @@ def _cls_value(col_name, features):
     if col_name in features:
         return _safe_float(features[col_name])
 
-    # Common aliasing.
     aliases = {
+        # Current LightGBM classifier artifact feature names.
+        "lag_spend_1": "prev3_avg_expense",
+        "lag_spend_2": "prev3_avg_expense",
+        "lag_spend_3": "prev3_avg_expense",
+        "roll_spend_mean_3": "prev3_avg_expense",
+        "roll_spend_mean_6": "prev3_avg_expense",
+        "roll_spend_std_6": "prev3_expense_std",
+        "roll_net_mean_3": "prev3_avg_savings",
+        "roll_net_mean_6": "prev3_avg_savings",
+        "roll_net_std_6": "prev3_std_savings",
+        "required_amount_h": "remaining_amount",
+        # Backward-compatible names.
         "remaining_amount": "remaining_amount",
         "months_left": "months_left",
         "required_monthly": "required_monthly",
@@ -91,6 +102,13 @@ def _cls_value(col_name, features):
     mapped = aliases.get(col_name)
     if mapped:
         return _safe_float(features.get(mapped, 0.0))
+
+    # Profile fields are not currently available in the runtime feature builder.
+    if col_name in ("monthly_income", "total_debt", "credit_score", "num_credit_cards", "year_num"):
+        return 0.0
+
+    if col_name == "month_num":
+        return _safe_float(features.get("month_num", 1.0))
 
     return 0.0
 

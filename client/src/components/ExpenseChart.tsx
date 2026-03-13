@@ -88,6 +88,11 @@ export function ExpenseChart({ data, title = "Expenses by Category" }: ExpenseCh
             ))}
           </tbody>
         </table>
+        <div className="mt-3 rounded-md border border-border/60 bg-muted/20 p-3 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Chart summary</p>
+          <p>{chartSummary}</p>
+          <p className="mt-1">Legend labels identify each category so the chart does not rely on color alone.</p>
+        </div>
       </CardContent>
     </Card>
   );

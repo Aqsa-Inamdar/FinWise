@@ -119,6 +119,13 @@ export function TrendChart({
         <p className="mt-2 text-xs text-muted-foreground">
           Both lines use the same USD scale for direct comparison.
         </p>
+        <div className="mt-3 rounded-md border border-border/60 bg-muted/20 p-3 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Chart summary</p>
+          <p>{chartSummary}</p>
+          <p className="mt-1">
+            Income uses the primary line. {expensesLabel} uses the comparison line. Labels and table data below support non-visual interpretation.
+          </p>
+        </div>
         <table className="sr-only" aria-label={`${title} data`}>
           <thead>
             <tr>

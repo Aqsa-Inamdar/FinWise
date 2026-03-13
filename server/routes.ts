@@ -12,7 +12,7 @@ import { firestore } from "./firebaseAdmin";
 import { getAuth } from "firebase-admin/auth";
 import type { CollectionReference } from "firebase-admin/firestore";
 import { z } from "zod";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
   allocateGoalsByDeadline,
   buildGoalProjection,
@@ -378,6 +378,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const goalUpdateSchema = goalInputSchema.partial();
 
+  const importedTransactionSchema = z.object({
+    date: z
+      .string()
+      .min(1)
+      .refine((value) => !Number.isNaN(new Date(value).getTime()), {
+        message: "Transaction date must be valid.",
+      }),
+    description: z.string().trim().min(1).max(200),
+    category: z.string().trim().min(1).max(80),
+    amount: z.coerce.number().positive(),
+    type: z.enum(["income", "expense"]),
+  });
+
+  const importedTransactionsSchema = z.object({
+    transactions: z.array(importedTransactionSchema).min(1),
+  });
+
+  const transactionUpdateSchema = importedTransactionSchema.extend({
+    id: z.string().min(1),
+  });
+
+  const buildImportedTransactionId = (
+    userId: string,
+    txn: z.infer<typeof importedTransactionSchema>,
+  ) => {
+    const normalizedDate = new Date(txn.date).toISOString().slice(0, 10);
+    const fingerprint = [
+      userId,
+      normalizedDate,
+      txn.description.trim().toLowerCase(),
+      txn.category.trim().toLowerCase(),
+      txn.type,
+      Number(txn.amount).toFixed(2),
+    ].join("|");
+
+    return createHash("sha256").update(fingerprint).digest("hex").slice(0, 24);
+  };
+
   // Goal routes (Firestore)
   app.post("/api/goals", async (req, res) => {
     try {
@@ -478,11 +516,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
         }
         const mReq = req as MulterRequest;
-        const { userId, userName, userEmail } = req as Request & {
-          userId: string;
-          userName?: string;
-          userEmail?: string;
-        };
         if (!mReq.file) {
           console.error("No PDF file uploaded");
           return res.status(400).json({ error: "PDF statement is required" });
@@ -491,28 +524,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log("PDF file received, size:", mReq.file.size);
         const transactions = await extractTransactionsFromPdf(mReq.file.buffer);
         console.log("Extracted transactions:", transactions);
-
-        // Log transactions to Firestore under the authenticated user
-        if (transactions.length > 0) {
-          const batch = firestore.batch();
-          transactions.forEach((txn) => {
-            const docRef = firestore
-              .collection("users")
-              .doc(userId)
-              .collection("transactions")
-              .doc(txn.id);
-            batch.set(docRef, {
-              ...txn,
-              userId,
-              userName: userName ?? null,
-              userEmail: userEmail ?? null,
-            });
-          });
-          await batch.commit();
-          console.log(`Logged ${transactions.length} transactions to Firestore.`);
-        } else {
-          console.log("No transactions extracted from PDF.");
-        }
         res.json({ transactions });
       } catch (error) {
         console.error("Error in /api/transactions/parse-pdf:", error);
@@ -520,6 +531,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
+
+  app.patch("/api/transactions/:id", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = transactionUpdateSchema.parse({ ...req.body, id: req.params.id });
+      const docRef = firestore
+        .collection("users")
+        .doc(userId)
+        .collection("transactions")
+        .doc(parsed.id);
+
+      const existing = await docRef.get();
+      if (!existing.exists) {
+        return res.status(404).json({ error: "Transaction not found." });
+      }
+
+      await docRef.set(
+        {
+          date: new Date(`${parsed.date.slice(0, 10)}T12:00:00.000Z`).toISOString(),
+          description: parsed.description.trim(),
+          category: parsed.category.trim() || "General",
+          amount: Number(parsed.amount),
+          type: parsed.type,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+
+      await writeAuditLog(userId, "transaction_update", parsed.id, {
+        amount: Number(parsed.amount),
+        category: parsed.category,
+        type: parsed.type,
+      });
+
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message ?? "Failed to update transaction." });
+    }
+  });
+
+  app.delete("/api/transactions/:id", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const docRef = firestore
+        .collection("users")
+        .doc(userId)
+        .collection("transactions")
+        .doc(req.params.id);
+
+      const existing = await docRef.get();
+      if (!existing.exists) {
+        return res.status(404).json({ error: "Transaction not found." });
+      }
+
+      await docRef.delete();
+      await writeAuditLog(userId, "transaction_delete", req.params.id);
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to delete transaction." });
+    }
+  });
+
+  app.post("/api/transactions/import", async (req, res) => {
+    try {
+      const { userId, userName, userEmail } = req as Request & {
+        userId: string;
+        userName?: string;
+        userEmail?: string;
+      };
+      const parsed = importedTransactionsSchema.parse(req.body);
+      const batch = firestore.batch();
+
+      parsed.transactions.forEach((txn) => {
+        const normalizedDate = new Date(`${txn.date.slice(0, 10)}T12:00:00.000Z`).toISOString();
+        const docId = buildImportedTransactionId(userId, txn);
+        const docRef = firestore
+          .collection("users")
+          .doc(userId)
+          .collection("transactions")
+          .doc(docId);
+
+        batch.set(
+          docRef,
+          {
+            id: docId,
+            date: normalizedDate,
+            description: txn.description.trim(),
+            category: txn.category.trim() || "General",
+            amount: Number(txn.amount),
+            type: txn.type,
+            userId,
+            userName: userName ?? null,
+            userEmail: userEmail ?? null,
+            source: "pdf_import",
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+      });
+
+      await batch.commit();
+      await writeAuditLog(userId, "transactions_import", "pdf_import", {
+        count: parsed.transactions.length,
+      });
+
+      return res.json({ success: true, imported: parsed.transactions.length });
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message ?? "Failed to import transactions." });
+    }
+  });
 
   app.get("/api/insights", async (req, res) => {
     try {

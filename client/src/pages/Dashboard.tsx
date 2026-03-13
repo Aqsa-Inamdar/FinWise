@@ -2,6 +2,7 @@ import { DollarSign, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { StatCard } from "@/components/StatCard";
 import { ExpenseChart } from "@/components/ExpenseChart";
 import { TrendChart } from "@/components/TrendChart";
@@ -268,7 +269,7 @@ export default function Dashboard() {
               entertainment, transportation, utilities, and other cost categories.
             </p>
 
-            <ExpenseChart data={expenseData} aria-hidden="true" />
+            <ExpenseChart data={expenseData} />
           </div>
 
           {/* Trend chart with ARIA labels */}
@@ -294,7 +295,7 @@ export default function Dashboard() {
                     value={String(startMonth)}
                     onValueChange={(value) => handleStartChange(startYear, Number(value))}
                   >
-                    <SelectTrigger className="w-28">
+                    <SelectTrigger className="w-28" aria-label="Start month">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -309,7 +310,7 @@ export default function Dashboard() {
                     value={String(startYear)}
                     onValueChange={(value) => handleStartChange(Number(value), startMonth)}
                   >
-                    <SelectTrigger className="w-24">
+                    <SelectTrigger className="w-24" aria-label="Start year">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -330,7 +331,7 @@ export default function Dashboard() {
                     value={String(endMonth)}
                     onValueChange={(value) => handleEndChange(endYear, Number(value))}
                   >
-                    <SelectTrigger className="w-28">
+                    <SelectTrigger className="w-28" aria-label="End month">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -345,7 +346,7 @@ export default function Dashboard() {
                     value={String(endYear)}
                     onValueChange={(value) => handleEndChange(Number(value), endMonth)}
                   >
-                    <SelectTrigger className="w-24">
+                    <SelectTrigger className="w-24" aria-label="End year">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -364,22 +365,24 @@ export default function Dashboard() {
                   <Checkbox
                     checked={showIncome}
                     onCheckedChange={(value) => setShowIncome(Boolean(value))}
+                    aria-label="Show income line"
                   />
-                  Income
+                  Income line
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={showExpenses}
                     onCheckedChange={(value) => setShowExpenses(Boolean(value))}
+                    aria-label="Show comparison line"
                   />
-                  Expenses
+                  Comparison line
                 </label>
               </div>
 
               <div className="space-y-1">
-                <p className="text-sm font-medium">Expense category</p>
+                <Label htmlFor="expense-category-select" className="text-sm font-medium">Expense category</Label>
                 <Select value={selectedExpenseCategory} onValueChange={setSelectedExpenseCategory}>
-                  <SelectTrigger className="w-48">
+                  <SelectTrigger id="expense-category-select" className="w-48" aria-label="Expense category">
                     <SelectValue placeholder="All expenses" />
                   </SelectTrigger>
                   <SelectContent>
@@ -400,14 +403,14 @@ export default function Dashboard() {
               showIncome={showIncome}
               showExpenses={showExpenses}
               expensesLabel={selectedExpenseCategory === "all" ? "Expenses" : selectedExpenseCategory}
-              aria-hidden="true"
             />
           </div>
         </div>
       ) : (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground mb-4">
-            No expenses tracked yet. Start by adding your first expense!
+        <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 py-12 text-center">
+          <p className="font-medium text-foreground">No expense data yet</p>
+          <p className="mb-4 text-muted-foreground">
+            Add your first expense to unlock charts, trends, and savings summaries.
           </p>
           <AddExpenseDialog />
         </div>

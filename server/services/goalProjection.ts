@@ -356,9 +356,16 @@ export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = n
   const low = clampPositive(prediction.low_savings);
   const high = clampPositive(prediction.high_savings);
 
-  const projectedMonths = computeMonthsToGoal(remaining, predicted);
-  const optimisticMonths = computeMonthsToGoal(remaining, high);
-  const pessimisticMonths = computeMonthsToGoal(remaining, low);
+  // Restore the earlier projection behavior: if the ML monthly forecast is non-positive,
+  // infer timeline from the user's recent average savings trend instead.
+  const trendMonthlyProjection = Math.max(0, features.prev3_avg_savings);
+  const timelineMonthlyProjection = predicted > 0 ? predicted : trendMonthlyProjection;
+  const optimisticMonthlyProjection = high > 0 ? high : timelineMonthlyProjection;
+  const pessimisticMonthlyProjection = low > 0 ? low : timelineMonthlyProjection;
+
+  const projectedMonths = computeMonthsToGoal(remaining, timelineMonthlyProjection);
+  const optimisticMonths = computeMonthsToGoal(remaining, optimisticMonthlyProjection);
+  const pessimisticMonths = computeMonthsToGoal(remaining, pessimisticMonthlyProjection);
 
   const projectedCompletionDate = projectedMonths ? addMonths(now, projectedMonths).toISOString() : null;
   const optimisticCompletionDate = optimisticMonths ? addMonths(now, optimisticMonths).toISOString() : null;
@@ -368,7 +375,7 @@ export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = n
   const deadline = goal.deadline ? new Date(goal.deadline) : null;
 
   if (!deadline || !projectedCompletionDate) {
-    status = predicted > 0 ? "on_track" : "behind";
+    status = timelineMonthlyProjection > 0 ? "on_track" : "behind";
   } else {
     const projectedDate = new Date(projectedCompletionDate);
     const optimisticDate = optimisticCompletionDate ? new Date(optimisticCompletionDate) : null;
@@ -384,7 +391,9 @@ export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = n
   const reasoning = [
     `Remaining amount: $${remaining.toFixed(2)}.`,
     `Predicted monthly savings: $${predicted.toFixed(2)}.`,
-    "Forecast uses a global model trained on historical transaction patterns.",
+    predicted > 0
+      ? "Forecast uses a global model trained on historical transaction patterns."
+      : `ML forecast was non-positive, so projected completion uses recent average savings trend of $${trendMonthlyProjection.toFixed(2)}/month.`,
   ];
 
   // Production contract: deadline decision + probability + explainability.
@@ -408,7 +417,7 @@ export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = n
       : clamp01(prediction.classification_probability);
   const probabilityAchievableByDeadline = classifierProbability ?? fallbackProbability;
 
-  const achievableByDeadline =
+  const classifierAchievableByDeadline =
     probabilityAchievableByDeadline == null
       ? null
       : probabilityAchievableByDeadline >= FINAL_MODEL_CONFIG.threshold;
@@ -417,12 +426,24 @@ export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = n
     ? addMonths(now, projectedMonths).toISOString()
     : null;
 
+  const timelineAchievableByDeadline =
+    deadline && inferredCompletionDate
+      ? new Date(inferredCompletionDate).getTime() <= deadline.getTime()
+      : null;
+
+  const achievableByDeadline =
+    timelineAchievableByDeadline != null
+      ? timelineAchievableByDeadline
+      : classifierAchievableByDeadline;
+
   let statusMessage = "Goal projection available.";
   if (achievableByDeadline === true) {
     statusMessage = "Projected to hit this goal on or before deadline.";
-  } else if (achievableByDeadline === false && inferredCompletionDate) {
+  } else if (inferredCompletionDate) {
     statusMessage = "Not projected by deadline; projected to hit later if trend continues.";
-  } else if (achievableByDeadline === false) {
+  } else if (timelineMonthlyProjection > 0) {
+    statusMessage = "Goal is not yet projected to complete by the deadline under the current savings trend.";
+  } else {
     statusMessage = "Current savings trend is insufficient for this goal horizon.";
   }
 
@@ -431,7 +452,7 @@ export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = n
     explainability.push({
       label: "Required monthly savings",
       impact: requiredMonthlyToHitDeadline <= predicted ? "positive" : "negative",
-      detail: `Need about $${requiredMonthlyToHitDeadline.toFixed(2)}/month vs predicted $${predicted.toFixed(2)}/month.`,
+      detail: `Need about $${requiredMonthlyToHitDeadline.toFixed(2)}/month vs predicted $${timelineMonthlyProjection.toFixed(2)}/month.`,
     });
   }
   explainability.push({
@@ -453,6 +474,18 @@ export const buildGoalProjection = async (userId: string, goal: GoalDoc, now = n
       features.prev3_income_ratio > features.prev3_expense_ratio ? "positive" : "negative",
     detail: `Income ratio ${features.prev3_income_ratio.toFixed(2)} vs expense ratio ${features.prev3_expense_ratio.toFixed(2)} over last 3 months.`,
   });
+  if (
+    timelineAchievableByDeadline != null &&
+    classifierAchievableByDeadline != null &&
+    timelineAchievableByDeadline !== classifierAchievableByDeadline
+  ) {
+    explainability.push({
+      label: "Decision policy",
+      impact: "neutral",
+      detail:
+        "Status is based on projected completion date versus deadline. Probability is shown as supporting model confidence.",
+    });
+  }
 
   return {
     predictedMonthlySavings: predicted,

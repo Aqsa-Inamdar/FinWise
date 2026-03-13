@@ -341,12 +341,12 @@ export default function Insights() {
               </p>
             </div>
           </div>
-          <div className="rounded-md border p-3 text-sm text-slate-600">
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
             This estimate comes from the spread of daily expenses. We calculate the average daily spend and
             measure how far typical days deviate from that average.
           </div>
-          <div className="rounded-md border p-3 text-sm text-slate-600">
-            <p className="font-medium text-slate-900">How we calculated this</p>
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">How we calculated this</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>Daily spend is the sum of all expense transactions per day.</li>
               <li>
@@ -403,12 +403,12 @@ export default function Insights() {
           {rollingAverages.avg3Spend > 0 && (
             <p className="text-sm text-muted-foreground">Change vs baseline: {changePct.toFixed(1)}%</p>
           )}
-          <div className="rounded-md border p-3 text-sm text-slate-600">
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
             Baseline is the average of your last 3 months of expenses. The change shows how far this month
             moved from that baseline.
           </div>
-          <div className="rounded-md border p-3 text-sm text-slate-600">
-            <p className="font-medium text-slate-900">How we calculated this</p>
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">How we calculated this</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>Monthly expenses are the sum of all expense transactions for {monthLabel}.</li>
               <li>3‑month baseline is the average of the last 3 months with data.</li>
@@ -449,8 +449,8 @@ export default function Insights() {
               Contribution to monthly change: {(driver.contribution * 100).toFixed(0)}% ({driver.delta >= 0 ? "increase" : "decrease"}).
             </p>
           )}
-          <div className="rounded-md border p-3 text-sm text-slate-600">
-            <p className="font-medium text-slate-900">How we calculated this</p>
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">How we calculated this</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>Category change = this month’s category spend − last month’s category spend.</li>
               <li>Contribution = category change ÷ total spending change.</li>
@@ -475,8 +475,8 @@ export default function Insights() {
           )}
           <p>Current savings rate: {current.toFixed(1)}%</p>
           <p>6‑month average: {avg.toFixed(1)}%</p>
-          <div className="rounded-md border p-3 text-sm text-slate-600">
-            <p className="font-medium text-slate-900">How we calculated this</p>
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">How we calculated this</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               <li>Savings = income − expenses.</li>
               <li>Savings rate = savings ÷ income.</li>
@@ -497,8 +497,8 @@ export default function Insights() {
           </ul>
         )}
         <p>This insight is based on your logged transactions for {monthLabel}.</p>
-        <div className="rounded-md border p-3 text-sm text-slate-600">
-          <p className="font-medium text-slate-900">How we calculated this</p>
+        <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">How we calculated this</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>We summarize your transactions for the selected month.</li>
             <li>Amounts shown are totals of income and expense entries you recorded.</li>

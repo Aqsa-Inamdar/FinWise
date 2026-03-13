@@ -39,6 +39,11 @@ const ENTRY_START_REGEX =
   /^(\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\s+(.+)/;
 const DATE_NAME_START_REGEX = /^(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{2,4}))?\s+(.+)/;
 const DATE_NAME_END_REGEX = /^(.+?)\s+(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{2,4}))?$/;
+const MONTH_ALIAS_HEADER_REGEX = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+Y(\d+)$/i;
+const SIMULATED_ROW_WITH_MONTH_REGEX =
+  /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{2})\s+(.+?)\s+(Income|Rent|Rent\/Housing|Utilities|Internet|Phone|Groceries|Transport|Dining|Shopping|Subscriptions|EMI\/Loan|Healthcare|Entertainment|Travel|General|Uncategorized)\s+([+-]?\d[\d,]*\.\d{2})$/i;
+const SIMULATED_ROW_DAY_ONLY_REGEX =
+  /^(\d{2})\s+(.+?)\s+(Income|Rent|Rent\/Housing|Utilities|Internet|Phone|Groceries|Transport|Dining|Shopping|Subscriptions|EMI\/Loan|Healthcare|Entertainment|Travel|General|Uncategorized)\s+([+-]?\d[\d,]*\.\d{2})$/i;
 const AMOUNT_ONLY_REGEX = /^([+-]?\$?\s?\d[\d,]*\.\d{2})$/;
 const AMOUNT_REGEX = /[+-]?\$?\d[\d,]*\.\d{2}/g;
 const DATE_TOKEN_REGEX = /\b(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?\b/;
@@ -51,14 +56,20 @@ const SECTION_HEADERS = [
 ];
 
 const categoryKeywords: Record<string, string[]> = {
+  rent: ["rent", "mortgage", "lease", "apartment", "housing"],
   groceries: ["grocery", "market", "mart", "superstore", "walmart", "aldi", "costco"],
   dining: ["cafe", "restaurant", "coffee", "diner", "eatery"],
   transport: ["uber", "lyft", "gas", "fuel", "shell", "chevron", "transport"],
+  entertainment: ["movie", "cinema", "concert", "ticket", "game", "entertainment"],
+  subscriptions: ["subscription", "netflix", "spotify", "membership"],
+  healthcare: ["clinic", "pharmacy", "doctor", "hospital", "medical", "dentist"],
+  emi_loan: ["emi", "loan", "installment", "mortgage payment", "car payment"],
   income: ["salary", "payroll", "deposit", "paycheck", "direct deposit"],
 };
 const knownCategoryLabels = [
   "Income",
   "Rent",
+  "Rent/Housing",
   "Utilities",
   "Internet",
   "Phone",
@@ -66,6 +77,11 @@ const knownCategoryLabels = [
   "Transport",
   "Dining",
   "Shopping",
+  "Subscriptions",
+  "EMI/Loan",
+  "Healthcare",
+  "Entertainment",
+  "Travel",
   "General",
   "Uncategorized",
 ];
@@ -101,6 +117,10 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
 
   const transactions: ParsedStatementTransaction[] = [];
   const defaultYear = findDefaultYear(text);
+  const simulatedTransactions = parseSimulatedStatementTransactions(lines);
+  if (simulatedTransactions.length > 0) {
+    return simulatedTransactions;
+  }
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -228,12 +248,86 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
   return transactions;
 }
 
+function parseSimulatedStatementTransactions(lines: string[]): ParsedStatementTransaction[] {
+  const transactions: ParsedStatementTransaction[] = [];
+  const now = new Date();
+  const aliasValues = lines
+    .map((line) => line.match(MONTH_ALIAS_HEADER_REGEX))
+    .filter(Boolean)
+    .map((match) => Number(match?.[2]))
+    .filter((value) => !Number.isNaN(value));
+  const maxAlias = aliasValues.length > 0 ? Math.max(...aliasValues) : 1;
+  // Map the highest alias year to the previous completed calendar year.
+  // Example in 2026: Y1/Y2 becomes 2024/2025, not 2025/2026.
+  const aliasBaseYear = now.getUTCFullYear() - maxAlias - 1;
+  let currentMonthIndex: number | null = null;
+  let currentYearAlias: number | null = null;
+
+  for (const line of lines) {
+    if (
+      /^--\s*\d+\s+of\s+\d+\s*--$/i.test(line) ||
+      /^Date Description Category Amount/i.test(line) ||
+      /simulated bank statement|synthetic, realistic test data/i.test(line) ||
+      /^Location:/i.test(line)
+    ) {
+      continue;
+    }
+
+    const headerMatch = line.match(MONTH_ALIAS_HEADER_REGEX);
+    if (headerMatch) {
+      currentMonthIndex = monthNameToIndex(headerMatch[1]);
+      currentYearAlias = Number(headerMatch[2]);
+      continue;
+    }
+
+    const explicitMonthMatch = line.match(SIMULATED_ROW_WITH_MONTH_REGEX);
+    if (explicitMonthMatch) {
+      const [, monthRaw, dayRaw, description, category, amountRaw] = explicitMonthMatch;
+      const monthIndex = monthNameToIndex(monthRaw);
+      const yearAlias = currentYearAlias ?? 1;
+      if (monthIndex === null) continue;
+      const year = aliasBaseYear + yearAlias;
+      const maybeTransaction = buildTransaction(
+        `${year}-${String(monthIndex + 1).padStart(2, "0")}-${dayRaw}`,
+        description,
+        amountRaw,
+        year,
+        category,
+      );
+      if (maybeTransaction) {
+        transactions.push(maybeTransaction);
+      }
+      currentMonthIndex = monthIndex;
+      continue;
+    }
+
+    const dayOnlyMatch = line.match(SIMULATED_ROW_DAY_ONLY_REGEX);
+    if (dayOnlyMatch && currentMonthIndex !== null && currentYearAlias !== null) {
+      const [, dayRaw, description, category, amountRaw] = dayOnlyMatch;
+      const year = aliasBaseYear + currentYearAlias;
+      const maybeTransaction = buildTransaction(
+        `${year}-${String(currentMonthIndex + 1).padStart(2, "0")}-${dayRaw}`,
+        description,
+        amountRaw,
+        year,
+        category,
+      );
+      if (maybeTransaction) {
+        transactions.push(maybeTransaction);
+      }
+    }
+  }
+
+  return transactions;
+}
+
 function buildTransaction(
   dateRaw: string,
   rawDescription: string,
   rawAmount: string,
   defaultYear?: number,
-  categoryOverride?: string
+  categoryOverride?: string,
+  typeOverride?: "income" | "expense"
 ) {
   const normalizedAmount = Number(rawAmount.replace(/[,$\s]/g, ""));
   if (Number.isNaN(normalizedAmount)) return null;
@@ -241,7 +335,8 @@ function buildTransaction(
   if (!description || description.toLowerCase().startsWith("total")) return null;
 
   const transactionDate = normalizeDate(dateRaw, defaultYear);
-  const type: "income" | "expense" = normalizedAmount >= 0 ? "income" : "expense";
+  const type: "income" | "expense" =
+    typeOverride ?? inferTransactionType(rawAmount, description, normalizedAmount);
   const amount = Math.abs(normalizedAmount);
   const category = categoryOverride ?? inferCategory(description, type);
 
@@ -343,6 +438,31 @@ function splitDescriptionAndCategory(raw: string): { description: string; catego
   return { description: description || normalized, category: match };
 }
 
+function inferTransactionType(
+  rawAmount: string,
+  description: string,
+  normalizedAmount: number
+): "income" | "expense" {
+  if (normalizedAmount < 0 || /\(/.test(rawAmount)) {
+    return "expense";
+  }
+
+  const normalized = description.toLowerCase();
+  if (categoryKeywords.income.some((keyword) => normalized.includes(keyword))) {
+    return "income";
+  }
+
+  return "expense";
+}
+
+function inferTypeFromSection(section: string): "income" | "expense" | undefined {
+  const normalized = section.toLowerCase();
+  if (!normalized) return undefined;
+  if (/deposit|credit/.test(normalized)) return "income";
+  if (/withdrawal|debit|purchase|check/.test(normalized)) return "expense";
+  return undefined;
+}
+
 function inferCategory(description: string, type: "income" | "expense"): string {
   const normalized = description.toLowerCase();
   if (type === "income") {
@@ -351,6 +471,8 @@ function inferCategory(description: string, type: "income" | "expense"): string 
 
   for (const [category, keywords] of Object.entries(categoryKeywords)) {
     if (keywords.some((keyword) => normalized.includes(keyword))) {
+      if (category === "emi_loan") return "EMI/Loan";
+      if (category === "rent") return "Rent/Housing";
       return capitalize(category);
     }
   }
@@ -455,7 +577,14 @@ function parseColumnarTransactions(lines: string[], defaultYear?: number): Parse
       if (!description && currentSection) {
         description = currentSection.replace(/\b\w/g, (c) => c.toUpperCase());
       }
-      const maybeTransaction = buildTransaction(dateRaw, description, amountCandidate, defaultYear);
+      const maybeTransaction = buildTransaction(
+        dateRaw,
+        description,
+        amountCandidate,
+        defaultYear,
+        undefined,
+        inferTypeFromSection(currentSection)
+      );
       if (maybeTransaction) {
         transactions.push(maybeTransaction);
       }
