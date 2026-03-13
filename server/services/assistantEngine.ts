@@ -107,6 +107,12 @@ const detectIntent = (question: string): { intent: AssistantIntent; subIntent: s
   if (/\btop\b.*\b(category|categories)\b|\b(category|categories)\b.*\btop\b/.test(q)) {
     return { intent: "descriptive", subIntent: "top_categories", confidenceHint: 0.95 };
   }
+  if (
+    /\bcompare\b.*\b(vs|versus|against)\b|\b(vs|versus|against)\b/.test(q) &&
+    /\b(category|categories|spend|spending|expense|expenses)\b/.test(q)
+  ) {
+    return { intent: "descriptive", subIntent: "category_compare", confidenceHint: 0.97 };
+  }
   if (/\bhow much\b.*\bspend\b.*\bon\b/.test(q)) {
     return { intent: "descriptive", subIntent: "category_spend", confidenceHint: 0.95 };
   }
@@ -139,6 +145,7 @@ const detectIntent = (question: string): { intent: AssistantIntent; subIntent: s
   const descriptiveRules: Array<{ subIntent: string; keywords: string[] }> = [
     { subIntent: "max_spend_month", keywords: ["most", "highest", "max", "month", "spend"] },
     { subIntent: "min_spend_month", keywords: ["least", "lowest", "min", "month", "spend"] },
+    { subIntent: "category_compare", keywords: ["compare", "vs", "versus", "against", "category"] },
     { subIntent: "category_spend", keywords: ["how", "much", "spend", "on"] },
     { subIntent: "unusual_month", keywords: ["unusual", "anomaly", "outlier", "spike", "month"] },
     { subIntent: "top_categories", keywords: ["top", "category", "categories", "expense"] },
@@ -779,7 +786,7 @@ const buildDescriptiveSuggestions = (params: {
   ];
 
   if (topCategory) suggestions.push(`How much do I spend on ${topCategory} in this range?`);
-  if (secondCategory) suggestions.push(`Compare my spend on ${topCategory} vs ${secondCategory}.`);
+  if (secondCategory && topCategory) suggestions.push(`Compare my spend on ${topCategory} vs ${secondCategory}.`);
   if (highestMonth) suggestions.push(`Why was my spending high in ${highestMonth}?`);
   if (lowestMonth) suggestions.push(`Why was my spending low in ${lowestMonth}?`);
   if (subIntent !== "top_categories") suggestions.push("What are my top expense categories?");
@@ -1080,16 +1087,35 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
   });
   const categoryNames = Array.from(categoryMap.keys());
 
+  const normalizeCategoryKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const matchCategoryName = (query: string) => {
+    const normalizedQuery = normalizeCategoryKey(query);
+    if (!normalizedQuery) return null;
+    return (
+      categoryNames.find((c) => normalizeCategoryKey(c) === normalizedQuery) ??
+      categoryNames.find((c) => normalizeCategoryKey(c).includes(normalizedQuery) || normalizedQuery.includes(normalizeCategoryKey(c))) ??
+      null
+    );
+  };
+
   const categoryQueryRaw =
     question.match(/\b(?:spend|spent|spending|expense|expenses)\s+on\s+([a-z0-9&/ -]+?)(?:\s+in\s+this\s+range|\?|$)/i)?.[1]?.trim() ??
     question.match(/\bon\s+([a-z0-9&/ -]+?)(?:\s+in\s+this\s+range|\?|$)/i)?.[1]?.trim() ??
     "";
-  const categoryQuery = categoryQueryRaw.toLowerCase();
-  const matchedCategory =
-    categoryNames.find((c) => c.toLowerCase() === categoryQuery) ??
-    categoryNames.find((c) => c.toLowerCase().includes(categoryQuery) || categoryQuery.includes(c.toLowerCase())) ??
-    null;
+  const matchedCategory = matchCategoryName(categoryQueryRaw);
   const matchedCategoryAmount = matchedCategory ? categoryMap.get(matchedCategory) ?? 0 : 0;
+
+  const compareCategories = (() => {
+    const compareMatch = question.match(/\bcompare\b.*?\bon\s+(.+?)\s+(?:vs|versus|against)\s+(.+?)(?:\s+in\s+this\s+range|\?|$)/i) ??
+      question.match(/\bcompare\b\s+(.+?)\s+(?:vs|versus|against)\s+(.+?)(?:\s+in\s+this\s+range|\?|$)/i);
+    if (!compareMatch) return null;
+    const leftRaw = compareMatch[1]?.trim() ?? "";
+    const rightRaw = compareMatch[2]?.trim() ?? "";
+    const left = matchCategoryName(leftRaw);
+    const right = matchCategoryName(rightRaw);
+    if (!left || !right) return { leftRaw, rightRaw, left: null, right: null };
+    return { leftRaw, rightRaw, left, right };
+  })();
 
   let unusualMonthText: string | null = null;
   if (monthly.length >= 3) {
@@ -1113,6 +1139,20 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
   let summary = "I analyzed your selected date range and summarized your spending behavior.";
   if (subIntent === "max_spend_month" && most) summary = `Your highest spending month was ${most.month}.`;
   if (subIntent === "min_spend_month" && least) summary = `Your lowest spending month was ${least.month}.`;
+  if (subIntent === "category_compare" && compareCategories?.left && compareCategories?.right) {
+    const leftAmount = categoryMap.get(compareCategories.left) ?? 0;
+    const rightAmount = categoryMap.get(compareCategories.right) ?? 0;
+    const higher = leftAmount >= rightAmount ? compareCategories.left : compareCategories.right;
+    const lower = higher === compareCategories.left ? compareCategories.right : compareCategories.left;
+    const diff = Math.abs(leftAmount - rightAmount);
+    summary =
+      diff < 0.01
+        ? `In this range, you spent about the same on ${compareCategories.left} and ${compareCategories.right}, at roughly $${leftAmount.toFixed(2)} each.`
+        : `In this range, you spent $${leftAmount.toFixed(2)} on ${compareCategories.left} and $${rightAmount.toFixed(2)} on ${compareCategories.right}. ${higher} was higher by $${diff.toFixed(2)}.`;
+  }
+  if (subIntent === "category_compare" && compareCategories && (!compareCategories.left || !compareCategories.right)) {
+    summary = `I could not confidently compare "${compareCategories.leftRaw}" and "${compareCategories.rightRaw}" from your current category list. Please use the category names shown in your dashboard or transactions.`;
+  }
   if (subIntent === "category_spend" && matchedCategory) {
     summary = `You spent $${matchedCategoryAmount.toFixed(2)} on ${matchedCategory} in this range.`;
   }
@@ -1126,7 +1166,7 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
     summary = `Your top expense category was ${categories[0].category}.`;
   }
 
-  const points = [
+  const generalEvidence = [
     most ? `Highest expense month: ${most.month} ($${most.value.toFixed(2)})` : "No monthly expense data found.",
     least ? `Lowest expense month: ${least.month} ($${least.value.toFixed(2)})` : "No monthly expense data found.",
     categories.length
@@ -1145,14 +1185,73 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
 
   const confidenceProb = monthly.length >= 6 ? 0.82 : monthly.length >= 3 ? 0.66 : 0.48;
 
-  return {
-    intent: "descriptive",
-    subIntent,
-    confidence: toConfidenceLabel(confidenceProb),
-    answerSummary: summary,
-    sections: [
-      { title: "Direct Answer", points: [summary] },
-      { title: "Evidence", points },
+  let sections: AssistantSection[] = [];
+  if (subIntent === "category_compare" && compareCategories?.left && compareCategories?.right) {
+    const leftAmount = categoryMap.get(compareCategories.left) ?? 0;
+    const rightAmount = categoryMap.get(compareCategories.right) ?? 0;
+    const totalTrackedExpense = Math.max(1, totalExpense);
+    const higher = leftAmount >= rightAmount ? compareCategories.left : compareCategories.right;
+    const lower = higher === compareCategories.left ? compareCategories.right : compareCategories.left;
+    const diff = Math.abs(leftAmount - rightAmount);
+    sections = [
+      {
+        title: "Comparison",
+        points: [
+          `${compareCategories.left}: $${leftAmount.toFixed(2)}`,
+          `${compareCategories.right}: $${rightAmount.toFixed(2)}`,
+          `${higher} was higher than ${lower} by $${diff.toFixed(2)}.`,
+        ],
+      },
+      {
+        title: "What this means",
+        points: [
+          `${compareCategories.left} made up ${((leftAmount / totalTrackedExpense) * 100).toFixed(1)}% of your total spending in this range.`,
+          `${compareCategories.right} made up ${((rightAmount / totalTrackedExpense) * 100).toFixed(1)}% of your total spending in this range.`,
+          diff < 0.01
+            ? "These two categories are currently affecting your budget at about the same level."
+            : `${higher} is currently the bigger budget driver out of the two.`,
+        ],
+      },
+    ];
+  } else if (subIntent === "category_spend" && matchedCategory) {
+    sections = [
+      {
+        title: "Category Spend",
+        points: [
+          `${matchedCategory}: $${matchedCategoryAmount.toFixed(2)}`,
+          `${matchedCategory} accounted for ${((matchedCategoryAmount / Math.max(1, totalExpense)) * 100).toFixed(1)}% of your total spending in this range.`,
+        ],
+      },
+      {
+        title: "Context",
+        points: generalEvidence,
+      },
+    ];
+  } else if (subIntent === "unusual_month" && unusualMonthText) {
+    sections = [
+      { title: "Why this stood out", points: [unusualMonthText] },
+      {
+        title: "Context",
+        points: generalEvidence,
+      },
+    ];
+  } else if (subIntent === "spending_patterns") {
+    sections = [
+      {
+        title: "Spending Pattern",
+        points: [
+          `Across this range, you earned $${totalIncome.toFixed(2)} and spent $${totalExpense.toFixed(2)}.`,
+          `That left you with net savings of $${totalSavings.toFixed(2)}.`,
+          categories.length
+            ? `Your biggest spending drivers were ${categories.slice(0, 3).map((c) => c.category).join(", ")}.`
+            : "There was not enough category detail to identify spending drivers.",
+          `Month-to-month expense movement was ${vol > 1000 ? "fairly uneven" : vol > 400 ? "moderately variable" : "fairly steady"} in this range.`,
+        ],
+      },
+    ];
+  } else {
+    sections = [
+      { title: "Key facts", points: generalEvidence },
       {
         title: "Range Overview",
         points: [
@@ -1162,7 +1261,15 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
           `Expense volatility (std): $${vol.toFixed(2)}`,
         ],
       },
-    ],
+    ];
+  }
+
+  return {
+    intent: "descriptive",
+    subIntent,
+    confidence: toConfidenceLabel(confidenceProb),
+    answerSummary: summary,
+    sections,
     evidence: [
       { label: "Months analyzed", value: String(monthly.length) },
       { label: "Transactions analyzed", value: String(txns.length) },

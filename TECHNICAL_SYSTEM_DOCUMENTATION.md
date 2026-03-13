@@ -49,6 +49,17 @@ Project folder includes historical datasets used in EDA/model development:
 
 The goal modeling notebooks and artifacts in `server/ml/models/archive (5)` were used to train/evaluate model candidates.
 
+The original source dataset used for modeling work came from Kaggle:
+
+- `https://www.kaggle.com/datasets/computingvictor/transactions-fraud-datasets/data`
+
+For model development, the workflow used up to roughly:
+
+- 4,000,000 transaction rows
+- 5,000 user records
+
+After cleaning, aggregation, snapshot building, and target construction, the final supervised goal-model training table contained tens of thousands of labeled rows rather than raw transaction rows.
+
 ---
 
 ## 3. Goal Prediction Models
@@ -92,13 +103,19 @@ Used for `predicted_savings` because:
 - robust performance in notebook model comparison/CV
 - good bias/variance tradeoff for this tabular feature set
 
-### LightGBM Classifier (deadline achievability probability)
+### LightGBM Classifier (deadline achievability support)
 
-Used for `P(achievable_by_deadline)` because:
+Used for deadline-achievability support because:
 
 - strong precision/recall/F1/AUC performance in offline evaluation
 - calibrated probability output via `predict_proba`
 - efficient inference for per-goal API calls
+
+Important runtime note:
+
+- the original classifier trained in notebook space did not align well enough with production runtime features
+- a runtime-aligned `LightGBMClassifier` was retrained on the actual production feature schema used by `predict_goal_projection.py`
+- this reduced the notebook/runtime contract mismatch
 
 ## 3.3 Feature Engineering (Goal Projection)
 
@@ -126,13 +143,24 @@ For each goal, backend returns:
 
 - predicted monthly savings (point + interval)
 - projected completion date
-- probability achievable by deadline
+- deadline-achievability support output
 - thresholded decision (`achievableByDeadline`)
 - explainability points (required monthly gap, trend, volatility, income/expense mix)
 
 Threshold policy in current contract:
 
 - balanced threshold = `0.41`
+
+Current decision hierarchy:
+
+1. Timeline-first status:
+   - if projected completion date is before the deadline, the goal is treated as on track
+2. Regression forecast:
+   - primary source of projected monthly savings
+3. Trend fallback:
+   - if the regression monthly forecast is non-positive, recent average savings trend can be used to derive a completion timeline
+4. Classifier support:
+   - classifier remains available in the backend contract and assistant workflow, but user-facing goal-card status is not driven primarily by the raw classification percentage
 
 ---
 
@@ -166,9 +194,10 @@ Backend executes plan using deterministic code and models:
 
 New routing safeguards:
 
-- high-signal descriptive prompts (e.g., "highest spending month", "how much spend on X", "unusual month")
-  are protected from being rewritten into predictive forecasts.
-- low-confidence generic intents trigger clarification instead of potentially wrong answers.
+- high-signal descriptive prompts (e.g., "highest spending month", "how much spend on X", "compare X vs Y", "unusual month")
+  are protected from being rewritten into predictive forecasts
+- low-confidence generic intents trigger clarification instead of potentially wrong answers
+- category comparison is handled by a dedicated descriptive route instead of being forced through single-category logic
 
 This ensures numeric correctness and auditability.
 
@@ -180,8 +209,16 @@ If narration fails (timeout/schema failure), deterministic response is returned.
 UI rendering policy for assistant responses:
 
 - summary bubble at top for quick read
-- detailed sections shown in collapsible panels (`<details>`) below
+- one `Explanation` dropdown below the answer bubble
 - duplicate direct-answer block removed to reduce repetition
+- explanation content is grouped to match the actual prompt type rather than showing generic repeated technical panels
+
+Narration prompt policy:
+
+- write in simple financial language
+- explain the result in easy terms
+- prioritize what happened, why it matters, and what the user should understand next
+- avoid overly statistical or technical phrasing when a plain-language version is possible
 
 ## 4.4 Context Awareness
 
@@ -276,8 +313,10 @@ For selected category:
 - series shown = `Income` vs `Selected Category Expense`
 - single shared Y-axis (USD) for direct comparison
 - semantic colors:
-  - income: primary color
-  - expenses/category: destructive color
+  - income: primary line color
+  - expenses/category: comparison line color
+
+Expense breakdown chart also uses stable category-specific colors so the same category does not change color unpredictably between renders.
 
 Missing months in selected range are zero-filled for continuity.
 
@@ -293,13 +332,39 @@ Missing months in selected range are zero-filled for continuity.
   - allocated amount
   - savings left after each goal
   - remaining amount
-  - deadline status/probability
+  - deadline status
+  - projected completion date
+  - explainability lines such as required monthly savings and recent savings trend
 
 Completed goals suppress unnecessary predictive detail.
 
+User-facing achievability probability was removed from the goal card UI because it could materially conflict with the timeline-first status message. The backend can still retain supporting model outputs for assistant/debug purposes.
+
 ---
 
-## 8. Account and Data Management
+## 8. Transactions and Data Management
+
+Transaction persistence now uses backend APIs for consistency:
+
+- `PATCH /api/transactions/:id`
+- `DELETE /api/transactions/:id`
+- `POST /api/transactions/import`
+
+Why this matters:
+
+- edits and deletes are persisted through the backend and audit layer
+- client-side state stays aligned with Firestore
+- PDF import now follows preview first, explicit save second
+
+PDF parsing notes:
+
+- debit/credit handling was improved so positive debit-like expenses are not incorrectly treated as income
+- known statement layouts and category aliases were expanded
+- category inference now supports values such as `Rent/Housing` and `EMI/Loan`
+
+---
+
+## 9. Account and Data Management
 
 Implemented account endpoints:
 
@@ -319,7 +384,22 @@ Delete account flow removes:
 
 ---
 
-## 9. Logging, Audit, and Traceability
+## 10. Accessibility and UX Engineering
+
+Implemented accessibility-oriented improvements include:
+
+- keyboard-accessible interactive controls
+- visible focus states
+- screen-reader-friendly landmarks and chat region labeling
+- accessible form labels and error messaging
+- chart summaries so visuals have text alternatives
+- non-color-only status signaling
+- dark-mode contrast fixes
+- simpler assistant narration for users with lower financial literacy
+
+---
+
+## 11. Logging, Audit, and Traceability
 
 Audit logs are written for critical actions:
 
@@ -332,7 +412,7 @@ Assistant queries also store intent/sub-intent/confidence metadata for QA and it
 
 ---
 
-## 10. Known Gaps / Future Enhancements
+## 12. Known Gaps / Future Enhancements
 
 - Add explicit response badge: `LLM narrated` vs `deterministic fallback`
 - Add stronger prescriptive controls (fixed-cost vs discretionary policy toggles)
@@ -343,7 +423,7 @@ Assistant queries also store intent/sub-intent/confidence metadata for QA and it
 
 ---
 
-## 11. Summary
+## 13. Summary
 
 The web app uses a practical hybrid architecture:
 
