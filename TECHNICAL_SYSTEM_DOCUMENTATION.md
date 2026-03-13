@@ -412,18 +412,7 @@ Assistant queries also store intent/sub-intent/confidence metadata for QA and it
 
 ---
 
-## 12. Known Gaps / Future Enhancements
-
-- Add explicit response badge: `LLM narrated` vs `deterministic fallback`
-- Add stronger prescriptive controls (fixed-cost vs discretionary policy toggles)
-- Add E2E tests for assistant routing + goal-gap scenarios
-- Improve mobile calendar responsiveness (1-month picker on small screens)
-- Add model registry/version metadata surfaced in admin diagnostics
-- Add startup health-check endpoint for ML artifacts + Python dependency verification (`lightgbm`, file presence)
-
----
-
-## 13. Summary
+## 12. Summary
 
 The web app uses a practical hybrid architecture:
 
