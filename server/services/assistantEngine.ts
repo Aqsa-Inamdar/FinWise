@@ -15,6 +15,12 @@ export type AssistantSection = {
   points: string[];
 };
 
+export type AssistantNavigation = {
+  type: "insights_month";
+  label: string;
+  month: string;
+};
+
 export type AssistantResponse = {
   intent: AssistantIntent;
   subIntent: string;
@@ -23,6 +29,7 @@ export type AssistantResponse = {
   sections: AssistantSection[];
   evidence: Array<{ label: string; value: string }>;
   suggestions: string[];
+  navigation?: AssistantNavigation;
 };
 
 type AssistantNarration = Pick<AssistantResponse, "answerSummary" | "sections" | "suggestions">;
@@ -1071,6 +1078,10 @@ const buildPrescriptiveSavingsResponse = async (
 const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent: string): AssistantResponse => {
   const monthly = monthlyTotals(txns);
   const categories = topCategories(txns);
+  const toInsightsNavigation = (
+    month: string | null | undefined,
+    label?: string,
+  ): AssistantNavigation | undefined => (month ? { type: "insights_month", label: label ?? `Open Insights for ${month}`, month } : undefined);
 
   const expenseMonthly = monthly.map((m) => ({ ...m, value: m.expense }));
   const most = expenseMonthly.length ? [...expenseMonthly].sort((a, b) => b.value - a.value)[0] : null;
@@ -1118,6 +1129,7 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
   })();
 
   let unusualMonthText: string | null = null;
+  let unusualMonthKey: string | null = null;
   if (monthly.length >= 3) {
     const vals = monthly.map((m) => m.expense);
     const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
@@ -1129,6 +1141,7 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
       if (mostUnusual && Math.abs(mostUnusual.z) >= 1) {
         const direction = mostUnusual.z > 0 ? "higher" : "lower";
         const difference = Math.abs(mostUnusual.expense - mean);
+        unusualMonthKey = mostUnusual.month;
         unusualMonthText = `${mostUnusual.month} stands out because you spent about $${difference.toFixed(2)} ${direction} than your usual monthly spending.`;
       } else {
         unusualMonthText = "No strongly unusual month detected in this range.";
@@ -1137,6 +1150,7 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
   }
 
   let summary = "I analyzed your selected date range and summarized your spending behavior.";
+  let navigation: AssistantNavigation | undefined;
   if (subIntent === "max_spend_month" && most) summary = `Your highest spending month was ${most.month}.`;
   if (subIntent === "min_spend_month" && least) summary = `Your lowest spending month was ${least.month}.`;
   if (subIntent === "category_compare" && compareCategories?.left && compareCategories?.right) {
@@ -1164,6 +1178,15 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
   }
   if (subIntent === "top_categories" && categories.length) {
     summary = `Your top expense category was ${categories[0].category}.`;
+  }
+  if (subIntent === "max_spend_month" && most) {
+    navigation = toInsightsNavigation(most.month);
+  }
+  if (subIntent === "min_spend_month" && least) {
+    navigation = toInsightsNavigation(least.month);
+  }
+  if (subIntent === "unusual_month" && unusualMonthKey) {
+    navigation = toInsightsNavigation(unusualMonthKey);
   }
 
   const generalEvidence = [
@@ -1276,6 +1299,7 @@ const buildDescriptiveResponse = (question: string, txns: TxnRecord[], subIntent
       { label: "Question", value: question },
     ],
     suggestions: buildDescriptiveSuggestions({ monthly, categories, subIntent }),
+    ...(navigation ? { navigation } : {}),
   };
 };
 

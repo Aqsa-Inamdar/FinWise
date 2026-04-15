@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,11 @@ type AssistantResponse = {
   sections: AssistantSection[];
   evidence: Array<{ label: string; value: string }>;
   suggestions: string[];
+  navigation?: {
+    type: "insights_month";
+    label: string;
+    month: string;
+  };
 };
 
 type MessageRecord = {
@@ -69,6 +75,7 @@ const confidenceColor = (c: AssistantResponse["confidence"]) => {
 
 export function AIAssistantChat() {
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [question, setQuestion] = useState("");
   const [chats, setChats] = useState<ChatThread[]>([]);
@@ -293,6 +300,19 @@ export function AIAssistantChat() {
             )}
           </div>
         </details>
+
+        {payload.navigation?.type === "insights_month" && (
+          <div className="flex">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/insights?month=${encodeURIComponent(payload.navigation!.month)}`)}
+            >
+              {payload.navigation.label}
+            </Button>
+          </div>
+        )}
 
         <div className="text-[11px] text-muted-foreground">
           Open "Explanation" to see how this answer was worked out.

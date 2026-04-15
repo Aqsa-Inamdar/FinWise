@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, parse } from "date-fns";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -102,8 +103,28 @@ const getAccent = (type: InsightSnapshot["insights"][number]["type"]) => {
 };
 
 export default function Insights() {
-  const [selectedMonth, setSelectedMonth] = React.useState(() => format(new Date(), "yyyy-MM"));
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialMonth = React.useMemo(() => {
+    const monthParam = searchParams.get("month");
+    return /^\d{4}-\d{2}$/.test(monthParam ?? "") ? (monthParam as string) : format(new Date(), "yyyy-MM");
+  }, [searchParams]);
+  const [selectedMonth, setSelectedMonth] = React.useState(initialMonth);
   const { transactions } = useFirestoreTransactions();
+
+  React.useEffect(() => {
+    const monthParam = searchParams.get("month");
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam) && monthParam !== selectedMonth) {
+      setSelectedMonth(monthParam);
+    }
+  }, [searchParams]);
+
+  React.useEffect(() => {
+    const currentParam = searchParams.get("month");
+    if (currentParam === selectedMonth) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("month", selectedMonth);
+    setSearchParams(next, { replace: true });
+  }, [selectedMonth, searchParams, setSearchParams]);
 
   const { data, isLoading, error } = useQuery<InsightSnapshot>({
     queryKey: ["/api/insights", selectedMonth],
