@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500" role="img" aria-labelledby="title desc">
+  <title id="title">Figure 4.24: Workflow of the AI Assistant Module in FinWise</title>
+  <desc id="desc">A vertical workflow diagram showing the flow from user chat input to backend handling, privacy redaction, planner LLM, deterministic execution, narrator LLM, fallback behavior, and structured assistant response in the FinWise interface.</desc>
+
+  <defs>
+    <style>
+      .title { font: 700 30px Arial, Helvetica, sans-serif; fill: #1f2937; }
+      .subtitle { font: 400 18px Arial, Helvetica, sans-serif; fill: #4b5563; }
+      .box-title { font: 700 24px Arial, Helvetica, sans-serif; fill: #111827; }
+      .body { font: 400 19px Arial, Helvetica, sans-serif; fill: #374151; }
+      .small { font: 400 17px Arial, Helvetica, sans-serif; fill: #4b5563; }
+      .box { stroke: #1f2937; stroke-width: 2.4; rx: 20; ry: 20; }
+      .dashed { stroke-dasharray: 8 8; }
+      .arrow { stroke: #1f2937; stroke-width: 3.5; fill: none; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#1f2937" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="1500" fill="#ffffff"/>
+
+  <text x="600" y="58" text-anchor="middle" class="title">Workflow of the AI Assistant Module in FinWise</text>
+  <text x="600" y="88" text-anchor="middle" class="subtitle">Planner-executor-narrator flow with privacy controls and structured UI output</text>
+
+  <rect x="180" y="140" width="840" height="110" class="box" fill="#e0f2fe"/>
+  <text x="600" y="182" text-anchor="middle" class="box-title">1. User Query in Assistant UI</text>
+  <text x="600" y="214" text-anchor="middle" class="body">User enters a financial question and may choose a date range or selected goal.</text>
+
+  <path d="M600 250 L600 300" class="arrow"/>
+
+  <rect x="180" y="300" width="840" height="110" class="box" fill="#ede9fe"/>
+  <text x="600" y="342" text-anchor="middle" class="box-title">2. Backend Receives Request</text>
+  <text x="600" y="374" text-anchor="middle" class="body">The backend validates the request and loads recent chat context if needed.</text>
+
+  <path d="M600 410 L600 460" class="arrow"/>
+
+  <rect x="180" y="460" width="840" height="110" class="box dashed" fill="#fef3c7"/>
+  <text x="600" y="502" text-anchor="middle" class="box-title">3. Privacy Redaction and Context Minimization</text>
+  <text x="600" y="534" text-anchor="middle" class="body">Sensitive items such as emails, phone numbers, and account-like strings are redacted.</text>
+
+  <path d="M600 570 L600 620" class="arrow"/>
+
+  <rect x="180" y="620" width="840" height="150" class="box" fill="#dcfce7"/>
+  <text x="600" y="662" text-anchor="middle" class="box-title">4. Planner LLM</text>
+  <text x="600" y="696" text-anchor="middle" class="body">Model used: GPT-5 mini</text>
+  <text x="600" y="726" text-anchor="middle" class="small">Returns a strict JSON plan with intent, sub-intent, horizon, scenario,</text>
+  <text x="600" y="752" text-anchor="middle" class="small">goal usage, and whether clarification is required.</text>
+
+  <path d="M600 770 L600 820" class="arrow"/>
+
+  <rect x="180" y="820" width="840" height="230" class="box" fill="#f3f4f6"/>
+  <text x="600" y="862" text-anchor="middle" class="box-title">5. Deterministic Backend Executor</text>
+  <text x="600" y="896" text-anchor="middle" class="body">The backend performs the actual financial work instead of letting the LLM invent numbers.</text>
+  <text x="600" y="932" text-anchor="middle" class="small">It retrieves Firestore data, computes descriptive summaries, runs scenario logic,</text>
+  <text x="600" y="958" text-anchor="middle" class="small">and calls the goal forecasting service when predictive outputs are required.</text>
+  <text x="600" y="998" text-anchor="middle" class="small">Sources used here include transactions, goals, recent chat context,</text>
+  <text x="600" y="1024" text-anchor="middle" class="small">and the LightGBM goal projection models.</text>
+
+  <path d="M600 1050 L600 1100" class="arrow"/>
+
+  <rect x="180" y="1100" width="840" height="150" class="box" fill="#fee2e2"/>
+  <text x="600" y="1142" text-anchor="middle" class="box-title">6. Narrator LLM</text>
+  <text x="600" y="1176" text-anchor="middle" class="body">Model used: GPT-5 mini</text>
+  <text x="600" y="1206" text-anchor="middle" class="small">Rewrites the deterministic result into plain-language explanation for the user.</text>
+  <text x="600" y="1232" text-anchor="middle" class="small">If narration fails, the system falls back to the deterministic response.</text>
+
+  <path d="M600 1250 L600 1300" class="arrow"/>
+
+  <rect x="180" y="1300" width="840" height="130" class="box" fill="#e0f2fe"/>
+  <text x="600" y="1342" text-anchor="middle" class="box-title">7. Structured Assistant Response Returned to UI</text>
+  <text x="600" y="1374" text-anchor="middle" class="body">The interface shows a summary, explanation panel, evidence, confidence,</text>
+  <text x="600" y="1400" text-anchor="middle" class="body">and follow-up suggestions, and stores the exchange in chat history.</text>
+</svg>

@@ -108,7 +108,7 @@ export async function extractTransactionsFromPdf(buffer: Buffer): Promise<Parsed
   return transactions;
 }
 
-function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
+export function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
   const normalizedText = text.replace(/(\S)\s+(?=\d{4}-\d{2}-\d{2}\b)/g, "$1\n");
   const lines = normalizedText
     .split(/\r?\n/)
@@ -248,7 +248,7 @@ function parseTextIntoTransactions(text: string): ParsedStatementTransaction[] {
   return transactions;
 }
 
-function parseSimulatedStatementTransactions(lines: string[]): ParsedStatementTransaction[] {
+export function parseSimulatedStatementTransactions(lines: string[]): ParsedStatementTransaction[] {
   const transactions: ParsedStatementTransaction[] = [];
   const now = new Date();
   const aliasValues = lines
@@ -321,7 +321,7 @@ function parseSimulatedStatementTransactions(lines: string[]): ParsedStatementTr
   return transactions;
 }
 
-function buildTransaction(
+export function buildTransaction(
   dateRaw: string,
   rawDescription: string,
   rawAmount: string,
@@ -350,7 +350,7 @@ function buildTransaction(
   };
 }
 
-function normalizeDate(date: string, defaultYear?: number): string {
+export function normalizeDate(date: string, defaultYear?: number): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     const parsed = new Date(`${date}T12:00:00.000Z`);
     if (!Number.isNaN(parsed.getTime())) {
@@ -395,7 +395,7 @@ function normalizeDate(date: string, defaultYear?: number): string {
   return parsed.toISOString();
 }
 
-function normalizeDescription(description: string): string {
+export function normalizeDescription(description: string): string {
   const cleaned = description.replace(/\s{2,}/g, " ").trim();
   if (!cleaned) return cleaned;
   const words = cleaned.split(" ");
@@ -410,7 +410,7 @@ function normalizeDescription(description: string): string {
   return deduped.join(" ").trim();
 }
 
-function mergeDescription(current: string, next: string): string {
+export function mergeDescription(current: string, next: string): string {
   if (!current) return next;
   if (!next) return current;
   const currentWords = current.split(" ");
@@ -423,7 +423,7 @@ function mergeDescription(current: string, next: string): string {
   return normalizeDescription(`${current} ${nextWords.join(" ")}`);
 }
 
-function splitDescriptionAndCategory(raw: string): { description: string; category?: string } {
+export function splitDescriptionAndCategory(raw: string): { description: string; category?: string } {
   const normalized = normalizeDescription(raw);
   const normalizedLower = normalized.toLowerCase();
   const match = knownCategoryLabels.find(
@@ -438,7 +438,7 @@ function splitDescriptionAndCategory(raw: string): { description: string; catego
   return { description: description || normalized, category: match };
 }
 
-function inferTransactionType(
+export function inferTransactionType(
   rawAmount: string,
   description: string,
   normalizedAmount: number
@@ -455,7 +455,7 @@ function inferTransactionType(
   return "expense";
 }
 
-function inferTypeFromSection(section: string): "income" | "expense" | undefined {
+export function inferTypeFromSection(section: string): "income" | "expense" | undefined {
   const normalized = section.toLowerCase();
   if (!normalized) return undefined;
   if (/deposit|credit/.test(normalized)) return "income";
@@ -463,7 +463,7 @@ function inferTypeFromSection(section: string): "income" | "expense" | undefined
   return undefined;
 }
 
-function inferCategory(description: string, type: "income" | "expense"): string {
+export function inferCategory(description: string, type: "income" | "expense"): string {
   const normalized = description.toLowerCase();
   if (type === "income") {
     return "Income";
@@ -480,17 +480,17 @@ function inferCategory(description: string, type: "income" | "expense"): string 
   return "General";
 }
 
-function capitalize(value: string): string {
+export function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function findDefaultYear(text: string): number | undefined {
+export function findDefaultYear(text: string): number | undefined {
   const matches = text.match(/\b(19|20)\d{2}\b/g);
   if (!matches || matches.length === 0) return undefined;
   return Number(matches[matches.length - 1]);
 }
 
-function normalizeYear(year: string): number {
+export function normalizeYear(year: string): number {
   if (year.length === 2) {
     const asNum = Number(year);
     return asNum >= 70 ? 1900 + asNum : 2000 + asNum;
@@ -498,7 +498,7 @@ function normalizeYear(year: string): number {
   return Number(year);
 }
 
-function monthNameToIndex(name: string): number | null {
+export function monthNameToIndex(name: string): number | null {
   const month = name.toLowerCase();
   const months = [
     "january",
@@ -518,7 +518,7 @@ function monthNameToIndex(name: string): number | null {
   return index === -1 ? null : index;
 }
 
-function pickAmountFromLine(line: string): string | null {
+export function pickAmountFromLine(line: string): string | null {
   if (/balance|total/i.test(line)) return null;
   const singleMatch = line.match(AMOUNT_ONLY_REGEX);
   if (singleMatch) return singleMatch[1];
@@ -533,7 +533,7 @@ function pickAmountFromLine(line: string): string | null {
   return parsed[0].raw;
 }
 
-function parseColumnarTransactions(lines: string[], defaultYear?: number): ParsedStatementTransaction[] {
+export function parseColumnarTransactions(lines: string[], defaultYear?: number): ParsedStatementTransaction[] {
   const transactions: ParsedStatementTransaction[] = [];
   let currentSection = "";
   let pendingDescription: string[] = [];

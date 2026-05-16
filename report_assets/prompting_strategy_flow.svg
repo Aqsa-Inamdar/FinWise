@@ -1,0 +1,83 @@
+<svg width="1800" height="620" viewBox="0 0 1800 620" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M2 2L11 7L2 12Z" fill="#4C2C92"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect width="1800" height="620" fill="white"/>
+
+  <text x="900" y="56" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="700" fill="#4C2C92">
+    Specific Prompting Strategy
+  </text>
+  <text x="900" y="90" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#5B6170">
+    Multi-stage prompting used in the FinWise AI assistant
+  </text>
+
+  <!-- Boxes -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="220" width="210" height="110" rx="18" fill="#F8F5FF" stroke="#4C2C92" stroke-width="2.5"/>
+    <rect x="340" y="220" width="240" height="110" rx="18" fill="#F7F0FF" stroke="#4C2C92" stroke-width="2.5"/>
+    <rect x="640" y="220" width="250" height="110" rx="18" fill="#EEF7FF" stroke="#4C2C92" stroke-width="2.5"/>
+    <rect x="950" y="220" width="250" height="110" rx="18" fill="#FFF8EE" stroke="#4C2C92" stroke-width="2.5"/>
+    <rect x="1260" y="220" width="260" height="110" rx="18" fill="#FFF4F8" stroke="#4C2C92" stroke-width="2.5"/>
+    <rect x="1580" y="220" width="170" height="110" rx="18" fill="#F4FAF7" stroke="#4C2C92" stroke-width="2.5"/>
+  </g>
+
+  <!-- Arrows -->
+  <g stroke="#4C2C92" stroke-width="4" marker-end="url(#arrow)">
+    <line x1="280" y1="275" x2="340" y2="275"/>
+    <line x1="580" y1="275" x2="640" y2="275"/>
+    <line x1="890" y1="275" x2="950" y2="275"/>
+    <line x1="1200" y1="275" x2="1260" y2="275"/>
+    <line x1="1520" y1="275" x2="1580" y2="275"/>
+  </g>
+
+  <!-- Box labels -->
+  <g fill="#1F2430" text-anchor="middle">
+    <text x="175" y="258" font-family="Arial, sans-serif" font-size="23" font-weight="700">User Question</text>
+    <text x="175" y="290" font-family="Arial, sans-serif" font-size="18">financial query enters</text>
+    <text x="175" y="314" font-family="Arial, sans-serif" font-size="18">the assistant</text>
+
+    <text x="460" y="252" font-family="Arial, sans-serif" font-size="23" font-weight="700">Planning Prompt</text>
+    <text x="460" y="284" font-family="Arial, sans-serif" font-size="18">classifies intent and</text>
+    <text x="460" y="308" font-family="Arial, sans-serif" font-size="18">returns a JSON plan</text>
+
+    <text x="765" y="252" font-family="Arial, sans-serif" font-size="23" font-weight="700">Contextualization</text>
+    <text x="765" y="284" font-family="Arial, sans-serif" font-size="18">rewrites follow-up</text>
+    <text x="765" y="308" font-family="Arial, sans-serif" font-size="18">into a standalone query</text>
+
+    <text x="1075" y="252" font-family="Arial, sans-serif" font-size="23" font-weight="700">Deterministic Executor</text>
+    <text x="1075" y="284" font-family="Arial, sans-serif" font-size="18">runs analytics,</text>
+    <text x="1075" y="308" font-family="Arial, sans-serif" font-size="18">forecasting, or scenarios</text>
+
+    <text x="1390" y="252" font-family="Arial, sans-serif" font-size="23" font-weight="700">Narration Prompt</text>
+    <text x="1390" y="284" font-family="Arial, sans-serif" font-size="18">rewrites results into</text>
+    <text x="1390" y="308" font-family="Arial, sans-serif" font-size="18">plain-language output</text>
+
+    <text x="1665" y="252" font-family="Arial, sans-serif" font-size="23" font-weight="700">Response</text>
+    <text x="1665" y="284" font-family="Arial, sans-serif" font-size="18">answer, evidence,</text>
+    <text x="1665" y="308" font-family="Arial, sans-serif" font-size="18">and suggestions</text>
+  </g>
+
+  <!-- Footer notes -->
+  <rect x="180" y="410" width="1440" height="120" rx="18" fill="#FBFBFD" stroke="#D6D6E7" stroke-width="1.8"/>
+  <text x="220" y="452" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#4C2C92">
+    Why this design was used
+  </text>
+  <text x="220" y="486" font-family="Arial, sans-serif" font-size="19" fill="#333844">
+    • separates reasoning, computation, and explanation
+  </text>
+  <text x="760" y="486" font-family="Arial, sans-serif" font-size="19" fill="#333844">
+    • improves control over assistant behavior
+  </text>
+  <text x="220" y="516" font-family="Arial, sans-serif" font-size="19" fill="#333844">
+    • reduces ambiguity compared with one large prompt
+  </text>
+  <text x="760" y="516" font-family="Arial, sans-serif" font-size="19" fill="#333844">
+    • supports more trustworthy financial responses
+  </text>
+</svg>

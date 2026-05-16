@@ -61,7 +61,7 @@ export type GoalProjection = {
 const monthKey = (date: Date) =>
   `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 
-const addMonths = (date: Date, months: number) => {
+export const addMonths = (date: Date, months: number) => {
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth();
   const day = date.getUTCDate();
@@ -71,21 +71,21 @@ const addMonths = (date: Date, months: number) => {
   return target;
 };
 
-const clampPositive = (value: number) => (Number.isFinite(value) ? value : 0);
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+export const clampPositive = (value: number) => (Number.isFinite(value) ? value : 0);
+export const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-const computeMonthsToGoal = (remaining: number, monthly: number) => {
+export const computeMonthsToGoal = (remaining: number, monthly: number) => {
   if (!Number.isFinite(monthly) || monthly <= 0) return null;
   return Math.max(1, Math.ceil(remaining / monthly));
 };
 
-const computeMonthsUntil = (from: Date, to: Date) => {
+export const computeMonthsUntil = (from: Date, to: Date) => {
   const fromMonth = from.getUTCFullYear() * 12 + from.getUTCMonth();
   const toMonth = to.getUTCFullYear() * 12 + to.getUTCMonth();
   return Math.max(1, toMonth - fromMonth);
 };
 
-const sigmoid = (value: number) => 1 / (1 + Math.exp(-value));
+export const sigmoid = (value: number) => 1 / (1 + Math.exp(-value));
 
 const FINAL_MODEL_CONFIG = Object.freeze({
   regressionModel: "LightGBMRegressor",
@@ -97,7 +97,7 @@ const FINAL_MODEL_CONFIG = Object.freeze({
     "Production artifacts are locked to LightGBMRegressor and LightGBMClassifier with deadline contract and explainability enabled.",
 });
 
-const buildFeaturesFromHistory = (history: MonthlySummary[]) => {
+export const buildFeaturesFromHistory = (history: MonthlySummary[]) => {
   if (history.length < 3) return null;
   const last3 = history.slice(-3);
   const avg = (values: number[]) => values.reduce((sum, val) => sum + val, 0) / values.length;
@@ -142,7 +142,7 @@ const buildFeaturesFromHistory = (history: MonthlySummary[]) => {
   };
 };
 
-const runPrediction = async (features: Record<string, number>) => {
+export const runPrediction = async (features: Record<string, number>) => {
   const payload = JSON.stringify({ features });
   const stdout = await new Promise<string>((resolve, reject) => {
     const child = spawn(ML_PYTHON_BIN, [PREDICT_SCRIPT], {

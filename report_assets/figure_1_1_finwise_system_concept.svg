@@ -1,0 +1,78 @@
+<svg width="1100" height="620" viewBox="0 0 1100 620" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0F172A" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2 2L10 6L2 10Z" fill="#2563EB"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="620" rx="36" fill="#F8FAFC"/>
+  <circle cx="98" cy="86" r="86" fill="#DBEAFE" opacity="0.65"/>
+  <circle cx="1018" cy="534" r="118" fill="#DCFCE7" opacity="0.62"/>
+  <path d="M98 510C220 430 318 552 462 486C606 420 670 300 828 354C936 390 1000 300 1050 254" stroke="#E2E8F0" stroke-width="5" stroke-linecap="round"/>
+
+  <text x="550" y="58" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="30" font-weight="700" fill="#0F172A">
+    Overview of FinWise System Concept
+  </text>
+  <text x="550" y="90" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#475569">
+    A user-centered personal finance platform combining tracking, insights, goals, and AI support
+  </text>
+
+  <g filter="url(#shadow)">
+    <rect x="425" y="122" width="250" height="92" rx="28" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="2"/>
+    <circle cx="472" cy="168" r="24" fill="#DBEAFE"/>
+    <path d="M472 166C483 166 492 157 492 146C492 135 483 126 472 126C461 126 452 135 452 146C452 157 461 166 472 166Z" fill="#2563EB" opacity="0.9" transform="scale(0.72) translate(184 63)"/>
+    <path d="M455 183C460 174 465 171 472 171C479 171 484 174 489 183" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+    <text x="550" y="159" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#0F172A">User</text>
+    <text x="550" y="184" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#64748B">Manages and reviews personal finances</text>
+  </g>
+
+  <line x1="550" y1="226" x2="550" y2="280" stroke="#2563EB" stroke-width="5" marker-end="url(#arrow)" stroke-linecap="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="350" y="292" width="400" height="112" rx="34" fill="#0F766E"/>
+    <rect x="365" y="307" width="370" height="82" rx="24" fill="#14B8A6" opacity="0.22"/>
+    <text x="550" y="342" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="38" font-weight="700" fill="#FFFFFF">FinWise</text>
+    <text x="550" y="373" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#CCFBF1">Personal finance management and decision-support system</text>
+  </g>
+
+  <line x1="550" y1="416" x2="550" y2="462" stroke="#2563EB" stroke-width="5" marker-end="url(#arrow)" stroke-linecap="round"/>
+  <line x1="200" y1="462" x2="900" y2="462" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+  <line x1="200" y1="462" x2="200" y2="484" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+  <line x1="375" y1="462" x2="375" y2="484" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+  <line x1="550" y1="462" x2="550" y2="484" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+  <line x1="725" y1="462" x2="725" y2="484" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+  <line x1="900" y1="462" x2="900" y2="484" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="96" y="492" width="208" height="76" rx="22" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <text x="200" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">Transactions</text>
+    <text x="200" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#64748B">Add, edit, delete, import</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="271" y="492" width="208" height="76" rx="22" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <text x="375" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">Dashboard</text>
+    <text x="375" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#64748B">Visual summaries and trends</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="446" y="492" width="208" height="76" rx="22" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <text x="550" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">Goals</text>
+    <text x="550" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#64748B">Savings targets and forecasts</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="621" y="492" width="208" height="76" rx="22" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <text x="725" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">Insights</text>
+    <text x="725" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#64748B">Behavior and spending analysis</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="796" y="492" width="208" height="76" rx="22" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+    <text x="900" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">AI Assistant</text>
+    <text x="900" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#64748B">Natural language support</text>
+  </g>
+</svg>

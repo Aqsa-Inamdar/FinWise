@@ -1,0 +1,95 @@
+<svg width="1500" height="900" viewBox="0 0 1500 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2 2L10 6L2 10Z" fill="black"/>
+    </marker>
+  </defs>
+
+  <rect width="1500" height="900" fill="white"/>
+
+  <text x="750" y="50" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="black">
+    Feature Engineering Workflow for Goal Forecasting
+  </text>
+
+  <!-- Top row -->
+  <rect x="80" y="120" width="250" height="110" rx="10" fill="white" stroke="black" stroke-width="2.5"/>
+  <text x="205" y="160" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="black">Raw Financial Data</text>
+  <text x="205" y="192" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" fill="black">Transactions, user-level</text>
+  <text x="205" y="216" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" fill="black">financial attributes</text>
+
+  <rect x="410" y="120" width="250" height="110" rx="10" fill="white" stroke="black" stroke-width="2.5"/>
+  <text x="535" y="160" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="black">Cleaning and</text>
+  <text x="535" y="188" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="black">Standardization</text>
+  <text x="535" y="216" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">Dates, amounts, invalid rows</text>
+
+  <rect x="740" y="120" width="250" height="110" rx="10" fill="white" stroke="black" stroke-width="2.5"/>
+  <text x="865" y="160" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="black">Monthly</text>
+  <text x="865" y="188" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="black">Aggregation</text>
+  <text x="865" y="216" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">Income, expense, savings, count</text>
+
+  <rect x="1070" y="120" width="320" height="110" rx="10" fill="white" stroke="black" stroke-width="2.5"/>
+  <text x="1230" y="160" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="black">Rolling Financial History</text>
+  <text x="1230" y="192" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" fill="black">Previous 3-month and 6-month</text>
+  <text x="1230" y="216" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" fill="black">behavioral windows</text>
+
+  <!-- Top arrows -->
+  <line x1="330" y1="175" x2="410" y2="175" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="660" y1="175" x2="740" y2="175" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="990" y1="175" x2="1070" y2="175" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- Mid row features -->
+  <rect x="120" y="340" width="250" height="140" rx="10" fill="white" stroke="black" stroke-width="2.2"/>
+  <text x="245" y="378" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="black">Rolling Features</text>
+  <text x="245" y="410" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">prev3_avg_savings</text>
+  <text x="245" y="435" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">prev3_std_savings</text>
+  <text x="245" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">prev3_trend</text>
+
+  <rect x="430" y="340" width="250" height="140" rx="10" fill="white" stroke="black" stroke-width="2.2"/>
+  <text x="555" y="378" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="black">Income / Expense</text>
+  <text x="555" y="410" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">prev3_avg_income</text>
+  <text x="555" y="435" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">prev3_avg_expense</text>
+  <text x="555" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">income_ratio, expense_ratio</text>
+
+  <rect x="740" y="340" width="250" height="140" rx="10" fill="white" stroke="black" stroke-width="2.2"/>
+  <text x="865" y="378" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="black">Lag and Stability</text>
+  <text x="865" y="410" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">lag1_savings</text>
+  <text x="865" y="435" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">lag2_savings</text>
+  <text x="865" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">income_std, expense_std</text>
+
+  <rect x="1050" y="340" width="290" height="140" rx="10" fill="white" stroke="black" stroke-width="2.2"/>
+  <text x="1195" y="378" text-anchor="middle" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="black">Seasonality Features</text>
+  <text x="1195" y="410" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">month_num</text>
+  <text x="1195" y="435" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">month_sin</text>
+  <text x="1195" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="black">month_cos</text>
+
+  <!-- connectors down -->
+  <line x1="1230" y1="230" x2="1230" y2="285" stroke="black" stroke-width="2.5"/>
+  <line x1="1230" y1="285" x2="245" y2="285" stroke="black" stroke-width="2.5"/>
+  <line x1="245" y1="285" x2="245" y2="340" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="555" y1="285" x2="555" y2="340" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="865" y1="285" x2="865" y2="340" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="1195" y1="285" x2="1195" y2="340" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- Goal-specific runtime row -->
+  <rect x="460" y="560" width="580" height="150" rx="10" fill="white" stroke="black" stroke-width="2.5"/>
+  <text x="750" y="600" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="black">Goal-Specific Runtime Features</text>
+  <text x="750" y="634" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="black">remaining_amount | months_left | required_monthly</text>
+  <text x="750" y="665" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="black">target_savings_ratio</text>
+  <text x="750" y="695" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" fill="black">Added at prediction time to connect financial history with the actual goal</text>
+
+  <!-- arrows to runtime features -->
+  <line x1="245" y1="480" x2="245" y2="530" stroke="black" stroke-width="2.3"/>
+  <line x1="245" y1="530" x2="750" y2="530" stroke="black" stroke-width="2.3"/>
+  <line x1="750" y1="530" x2="750" y2="560" stroke="black" stroke-width="2.3" marker-end="url(#arrow)"/>
+
+  <line x1="555" y1="480" x2="555" y2="530" stroke="black" stroke-width="2.3"/>
+  <line x1="865" y1="480" x2="865" y2="530" stroke="black" stroke-width="2.3"/>
+  <line x1="1195" y1="480" x2="1195" y2="530" stroke="black" stroke-width="2.3"/>
+
+  <!-- final model input -->
+  <rect x="500" y="790" width="500" height="85" rx="10" fill="white" stroke="black" stroke-width="2.8"/>
+  <text x="750" y="825" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="black">Final Forecasting Feature Set</text>
+  <text x="750" y="853" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="black">Used by the goal regression and classification models</text>
+
+  <line x1="750" y1="710" x2="750" y2="790" stroke="black" stroke-width="2.5" marker-end="url(#arrow)"/>
+</svg>

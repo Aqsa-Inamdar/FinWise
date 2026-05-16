@@ -145,7 +145,7 @@ export const computeStructuralShift = (
   return change / 2;
 };
 
-const computeCategoryTotals = (transactions: TransactionRecord[]) =>
+export const computeCategoryTotals = (transactions: TransactionRecord[]) =>
   transactions
     .filter((txn) => txn.type === "expense")
     .reduce<Record<string, number>>((acc, txn) => {
@@ -154,7 +154,7 @@ const computeCategoryTotals = (transactions: TransactionRecord[]) =>
       return acc;
     }, {});
 
-const computeDistribution = (categoryTotals: Record<string, number>) => {
+export const computeDistribution = (categoryTotals: Record<string, number>) => {
   const total = Object.values(categoryTotals).reduce((sum, v) => sum + v, 0);
   if (!total) return {};
   const dist: Record<string, number> = {};
@@ -164,7 +164,7 @@ const computeDistribution = (categoryTotals: Record<string, number>) => {
   return dist;
 };
 
-const computeMonthTotals = (transactions: TransactionRecord[]) => {
+export const computeMonthTotals = (transactions: TransactionRecord[]) => {
   const monthly = new Map<string, MonthTotals>();
   transactions.forEach((txn) => {
     const date = new Date(txn.date);
@@ -180,7 +180,7 @@ const computeMonthTotals = (transactions: TransactionRecord[]) => {
   return monthly;
 };
 
-const computeWeekdayWeekend = (transactions: TransactionRecord[]) => {
+export const computeWeekdayWeekend = (transactions: TransactionRecord[]) => {
   let weekdaySpend = 0;
   let weekendSpend = 0;
   const weekdayDays = new Set<string>();
